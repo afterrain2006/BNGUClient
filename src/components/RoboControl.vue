@@ -1,55 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { neutralOperatorInput, type OperatorInput, type OperatorInputPolicy } from '@/contracts/OperatorInput'
 
 const props = defineProps<{
   enabled: boolean
   hudEditMode: boolean
+  inputPolicy: OperatorInputPolicy
 }>()
 
 const emit = defineEmits<{
   (e: 'capture-change', captured: boolean): void
   (
     e: 'control-frame',
-    frame: {
-      mouseX: number
-      mouseY: number
-      mouseZ: number
-      leftButtonDown: boolean
-      rightButtonDown: boolean
-      midButtonDown: boolean
-      keyboardValue: number
-    }
+    frame: OperatorInput
   ): void
 }>()
-
-const CONTROL_FRAME_HZ = 75
-const CONTROL_FRAME_INTERVAL_MS = 1000 / CONTROL_FRAME_HZ
-const IDLE_NEUTRAL_HEARTBEAT_MS = 250
-const MOUSE_Y_PROTOCOL_DIRECTION = -1
-const INT32_MIN = -2147483648
-const INT32_MAX = 2147483647
-
-// RoboMaster 2026 KeyboardMouseControl.keyboard_value bit 0-15.
-const KEYBOARD_BITS_BY_CODE = new Map<string, number>([
-  ['KeyW', 1 << 0],
-  ['KeyS', 1 << 1],
-  ['KeyA', 1 << 2],
-  ['KeyD', 1 << 3],
-  ['ShiftLeft', 1 << 4],
-  ['ShiftRight', 1 << 4],
-  ['ControlLeft', 1 << 5],
-  ['ControlRight', 1 << 5],
-  ['KeyQ', 1 << 6],
-  ['KeyE', 1 << 7],
-  ['KeyR', 1 << 8],
-  ['KeyF', 1 << 9],
-  ['KeyG', 1 << 10],
-  ['KeyZ', 1 << 11],
-  ['KeyX', 1 << 12],
-  ['KeyC', 1 << 13],
-  ['KeyV', 1 << 14],
-  ['KeyB', 1 << 15]
-])
 
 const captureLayerRef = ref<HTMLElement | null>(null)
 const isCaptured = ref(false)
@@ -69,7 +34,7 @@ let lastNeutralFrameAt = 0
 let lastEmittedLeftButtonDown = false
 let lastEmittedRightButtonDown = false
 let lastEmittedMidButtonDown = false
-let lastEmittedKeyboardValue = 0
+let lastEmittedKeys = ''
 
 const CAPTURE_LISTENER_OPTIONS: AddEventListenerOptions = { capture: true }
 const WHEEL_LISTENER_OPTIONS: AddEventListenerOptions = { capture: true, passive: false }
@@ -85,72 +50,45 @@ function clearEnterTimer(): void {
   }
 }
 
-function clampInt32(value: number): number {
-  if (!Number.isFinite(value)) return 0
-  return Math.max(INT32_MIN, Math.min(INT32_MAX, Math.round(value)))
-}
-
 function isRobotControlKey(code: string): boolean {
-  return KEYBOARD_BITS_BY_CODE.has(code)
+  return props.inputPolicy.keys.includes(code)
 }
 
-function getKeyboardValue(): number {
-  let keyboardValue = 0
-  KEYBOARD_BITS_BY_CODE.forEach((bit, code) => {
-    if (pressedCodes.has(code)) {
-      keyboardValue |= bit
-    }
-  })
-  return keyboardValue
-}
-
-function createControlFrame(): {
-  mouseX: number
-  mouseY: number
-  mouseZ: number
-  leftButtonDown: boolean
-  rightButtonDown: boolean
-  midButtonDown: boolean
-  keyboardValue: number
-} {
+function createControlFrame(): OperatorInput {
   return {
-    mouseX: clampInt32(mouseXAccumulator),
-    mouseY: clampInt32(mouseYAccumulator),
-    mouseZ: clampInt32(mouseZAccumulator),
-    leftButtonDown,
-    rightButtonDown,
-    midButtonDown,
-    keyboardValue: getKeyboardValue()
+    mouse: { deltaX: mouseXAccumulator, deltaY: mouseYAccumulator, wheelSteps: mouseZAccumulator },
+    buttons: { left: leftButtonDown, right: rightButtonDown, middle: midButtonDown },
+    pressedKeys: [...pressedCodes].sort()
   }
 }
 
 function hasMotion(frame: ReturnType<typeof createControlFrame>): boolean {
-  return frame.mouseX !== 0 || frame.mouseY !== 0 || frame.mouseZ !== 0
+  return frame.mouse.deltaX !== 0 || frame.mouse.deltaY !== 0 || frame.mouse.wheelSteps !== 0
 }
 
 function hasHeldControl(frame: ReturnType<typeof createControlFrame>): boolean {
   return (
-    frame.leftButtonDown ||
-    frame.rightButtonDown ||
-    frame.midButtonDown ||
-    frame.keyboardValue !== 0
+    frame.buttons.left ||
+    frame.buttons.right ||
+    frame.buttons.middle ||
+    frame.pressedKeys.length > 0
   )
 }
 
 function hasControlStateChanged(frame: ReturnType<typeof createControlFrame>): boolean {
   return (
-    frame.leftButtonDown !== lastEmittedLeftButtonDown ||
-    frame.rightButtonDown !== lastEmittedRightButtonDown ||
-    frame.midButtonDown !== lastEmittedMidButtonDown ||
-    frame.keyboardValue !== lastEmittedKeyboardValue
+    frame.buttons.left !== lastEmittedLeftButtonDown ||
+    frame.buttons.right !== lastEmittedRightButtonDown ||
+    frame.buttons.middle !== lastEmittedMidButtonDown ||
+    frame.pressedKeys.join(',') !== lastEmittedKeys
   )
 }
 
 function rememberEmittedControlState(frame: ReturnType<typeof createControlFrame>): void {
-  lastEmittedLeftButtonDown = frame.leftButtonDown
-  lastEmittedRightButtonDown = frame.rightButtonDown
-  lastEmittedMidButtonDown = frame.midButtonDown
-  lastEmittedKeyboardValue = frame.keyboardValue
+  lastEmittedLeftButtonDown = frame.buttons.left
+  lastEmittedRightButtonDown = frame.buttons.right
+  lastEmittedMidButtonDown = frame.buttons.middle
+  lastEmittedKeys = frame.pressedKeys.join(',')
 }
 
 function emitControlFrame(): void {
@@ -161,7 +99,7 @@ function emitControlFrame(): void {
   const held = hasHeldControl(frame)
   const stateChanged = hasControlStateChanged(frame)
   const now = performance.now()
-  const shouldSend = moving || held || stateChanged || now - lastNeutralFrameAt >= IDLE_NEUTRAL_HEARTBEAT_MS
+  const shouldSend = moving || held || stateChanged || now - lastNeutralFrameAt >= props.inputPolicy.idleHeartbeatMs
 
   if (!shouldSend) return
 
@@ -176,15 +114,7 @@ function emitControlFrame(): void {
 }
 
 function emitNeutralFrame(): void {
-  const frame = {
-    mouseX: 0,
-    mouseY: 0,
-    mouseZ: 0,
-    leftButtonDown: false,
-    rightButtonDown: false,
-    midButtonDown: false,
-    keyboardValue: 0
-  }
+  const frame = neutralOperatorInput()
   emit('control-frame', frame)
   rememberEmittedControlState(frame)
   lastNeutralFrameAt = performance.now()
@@ -192,7 +122,7 @@ function emitNeutralFrame(): void {
 
 function startControlFrameTimer(): void {
   if (controlFrameTimer !== null) return
-  controlFrameTimer = window.setInterval(emitControlFrame, CONTROL_FRAME_INTERVAL_MS)
+  controlFrameTimer = window.setInterval(emitControlFrame, 1000 / props.inputPolicy.frameRateHz)
 }
 
 function stopControlFrameTimer(): void {
@@ -271,7 +201,7 @@ function handleMouseMove(event: MouseEvent): void {
   lastMouseClientY = event.clientY
 
   mouseXAccumulator += deltaX
-  mouseYAccumulator += deltaY * MOUSE_Y_PROTOCOL_DIRECTION
+  mouseYAccumulator += deltaY
 
   leftButtonDown = (event.buttons & 1) !== 0
   rightButtonDown = (event.buttons & 2) !== 0
@@ -322,7 +252,7 @@ function handleWheel(event: WheelEvent): void {
   if (rawDelta === 0) return
 
   const notchCount = Math.max(1, Math.min(10, Math.round(Math.abs(rawDelta) / 120)))
-  mouseZAccumulator -= Math.sign(rawDelta) * notchCount
+  mouseZAccumulator += Math.sign(rawDelta) * notchCount
 }
 
 function handleContextMenu(event: MouseEvent): void {

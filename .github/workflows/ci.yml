@@ -59,8 +59,6 @@ jobs:
         run: cargo check --all-targets
 
       - name: cargo test
-        # Placeholder — real tests land in stage S4. Until then this stays
-        # green because there are no integration tests under src-tauri/tests.
         run: cargo test --no-fail-fast
 
   frontend:
@@ -87,12 +85,16 @@ jobs:
       - name: Generate MQTT proto JSON
         run: npm run generate:mqtt-proto
 
-      - name: Type-check & build (vite)
-        # `npm run build` runs `vite build` which invokes vue-tsc indirectly
-        # via the build pipeline. The `prebuild` hook regenerates proto.
+      - name: Type-check, tests and schema verification
+        run: npm run check
+
+      - name: Build frontend
         run: npm run build
 
-      - name: Frontend tests (placeholder)
-        # Real vitest config arrives in stage S4. `--if-present` keeps CI
-        # green until the script exists.
-        run: npm test --if-present
+      - name: Install Mock Server dependencies
+        run: npm ci --prefix tools/rm2026-mock-server --no-audit --no-fund
+
+      - name: Check Mock Server
+        run: |
+          npm run typecheck --prefix tools/rm2026-mock-server
+          npm test --prefix tools/rm2026-mock-server

@@ -1,5 +1,9 @@
 <template>
-  <div class="health-bar-wrapper">
+  <div
+    class="health-bar-wrapper"
+    :class="{ stale: status === 'stale', missing: status === 'missing' }"
+    :aria-label="healthAriaLabel"
+  >
     <!-- 梯形背景容器 -->
     <div class="health-bar-container">
       <!-- 进度条 -->
@@ -7,8 +11,8 @@
         class="health-fill"
         :style="{ width: healthPercent + '%' }"
         :class="{
-          critical: healthPercent < 30,
-          warning: healthPercent < 50 && healthPercent >= 30
+          critical: status === 'fresh' && healthPercent < 30,
+          warning: status === 'fresh' && healthPercent < 50 && healthPercent >= 30
         }"
       ></div>
 
@@ -17,26 +21,41 @@
     </div>
 
     <!-- 数值显示 (绝对定位，不倾斜) -->
-    <div class="health-text">{{ currentHealth }} / {{ maxHealth }}</div>
+    <div class="health-text">{{ healthText }}</div>
+    <div v-if="status !== 'fresh'" class="health-state">
+      {{ status === 'missing' ? '等待血量' : '数据已过期' }}
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { DataFreshness } from '../../../composables/useFreshnessClock'
 
 interface Props {
-  currentHealth?: number
-  maxHealth?: number
+  currentHealth: number | null
+  maxHealth: number | null
+  status?: DataFreshness
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  currentHealth: 0,
-  maxHealth: 600
+  status: 'missing'
 })
 
 const healthPercent = computed(() => {
-  if (props.maxHealth === 0) return 0
+  if (props.currentHealth === null || props.maxHealth === null || props.maxHealth <= 0) return 0
   return Math.min(100, Math.max(0, Math.round((props.currentHealth / props.maxHealth) * 100)))
+})
+
+const healthText = computed(() => {
+  if (props.status === 'missing' || props.currentHealth === null) return '— / —'
+  return `${props.currentHealth} / ${props.maxHealth ?? '—'}`
+})
+
+const healthAriaLabel = computed(() => {
+  if (props.status === 'missing') return '等待血量数据'
+  const value = `当前血量 ${props.currentHealth}，最大血量 ${props.maxHealth ?? '未知'}`
+  return props.status === 'stale' ? `${value}，数据已过期` : value
 })
 </script>
 
@@ -47,6 +66,15 @@ const healthPercent = computed(() => {
   height: 32px;
   display: flex;
   align-items: center;
+}
+
+.health-bar-wrapper.stale .health-fill {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+
+.health-bar-wrapper.missing .health-fill {
+  width: 0 !important;
 }
 
 .health-bar-container {
@@ -138,6 +166,17 @@ const healthPercent = computed(() => {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
   letter-spacing: 2px;
   z-index: 10;
+  pointer-events: none;
+}
+
+.health-state {
+  position: absolute;
+  right: 7px;
+  bottom: 2px;
+  z-index: 11;
+  color: #cbd5e1;
+  font-size: 9px;
+  letter-spacing: 0;
   pointer-events: none;
 }
 </style>

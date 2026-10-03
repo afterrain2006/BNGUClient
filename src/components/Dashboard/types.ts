@@ -258,7 +258,7 @@ export interface GlobalState {
 /**
  * 重新导出 DetectionOverlay 的 Detection 类型
  */
-export type { Detection } from '@/utils/mqtt_protocol'
+export type { Detection } from '@/domain/vision/Detection'
 
 /**
  * 重新导出 CrosshairSettings 的 CrosshairConfig 类型

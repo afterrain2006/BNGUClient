@@ -1,5 +1,7 @@
 # UDP Low-Latency Video Plan
 
+> 历史优化计划：下文“当前”指撰写时状态，不代表本次重构收尾实现。现在的后端解码链、队列策略和交付边界以 [交付说明](development-handoff.md) 与源码为准。
+
 目标：Windows 和 Linux 都支持低延迟 UDP 图传。策略上优先保最新画面，允许丢旧帧，不追求逐帧完整播放。
 
 ## 背景结论

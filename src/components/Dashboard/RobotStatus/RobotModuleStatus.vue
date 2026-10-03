@@ -5,11 +5,18 @@
         v-for="(item, index) in statusItems"
         :key="index"
         class="module-item"
-        :class="{ active: item.status === 1, error: item.status === 0 }"
+        :class="{
+          active: freshness === 'fresh' && item.status === 'online',
+          error: freshness === 'fresh' && item.status === 'offline',
+          muted: freshness !== 'fresh' || item.status === 'unknown'
+        }"
       >
         <div class="status-slash"></div>
         <span class="module-name">{{ item.label }}</span>
       </div>
+    </div>
+    <div v-if="freshness !== 'fresh'" class="module-freshness">
+      {{ freshness === 'missing' ? '等待模块状态' : '模块状态已过期' }}
     </div>
     <!-- 底部红线装饰 (仅在非紧凑模式下显示) -->
     <div v-if="!compact" class="bottom-line"></div>
@@ -18,50 +25,36 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { RobotModuleStatus } from '../../../utils/mqtt_protocol'
+import type { RobotModuleState } from '@/domain/robot/RobotState'
+import type { DataFreshness } from '../../../composables/useFreshnessClock'
 
 interface Props {
-  moduleStatus?: RobotModuleStatus | null
+  moduleStatus?: RobotModuleState | null
+  freshness?: DataFreshness
   compact?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   moduleStatus: null,
+  freshness: 'missing',
   compact: false
 })
 
 const statusItems = computed(() => {
   const s = props.moduleStatus
-  // 默认全红(0)
-  const defaultStatus = 0
-
-  if (!s) {
-    // 如果没有数据，显示默认列表（全红）
-    return [
-      { label: '主控', status: defaultStatus },
-      { label: '电源管理', status: defaultStatus },
-      { label: '图传', status: defaultStatus },
-      { label: 'RFID', status: defaultStatus },
-      { label: 'UWB', status: defaultStatus },
-      { label: '装甲板', status: defaultStatus },
-      { label: '小弹丸', status: defaultStatus },
-      { label: '大弹丸', status: defaultStatus },
-      { label: '超级电容', status: defaultStatus },
-      { label: '灯条', status: defaultStatus }
-    ]
-  }
+  const defaultStatus = 'unknown'
 
   return [
-    { label: '主控', status: s.mainController },
-    { label: '电源管理', status: s.powerManager },
-    { label: '图传', status: s.videoTransmission },
-    { label: 'RFID', status: s.rfid },
-    { label: 'UWB', status: s.uwb },
-    { label: '装甲板', status: s.armor },
-    { label: '小弹丸', status: s.smallShooter },
-    { label: '大弹丸', status: s.bigShooter },
-    { label: '超级电容', status: s.capacitor },
-    { label: '灯条', status: s.lightStrip }
+    { label: '主控', status: s?.mainController ?? defaultStatus },
+    { label: '电源管理', status: s?.powerManager ?? defaultStatus },
+    { label: '图传', status: s?.videoTransmission ?? defaultStatus },
+    { label: 'RFID', status: s?.rfid ?? defaultStatus },
+    { label: 'UWB', status: s?.uwb ?? defaultStatus },
+    { label: '装甲板', status: s?.armor ?? defaultStatus },
+    { label: '小弹丸', status: s?.smallShooter ?? defaultStatus },
+    { label: '大弹丸', status: s?.bigShooter ?? defaultStatus },
+    { label: '超级电容', status: s?.capacitor ?? defaultStatus },
+    { label: '灯条', status: s?.lightStrip ?? defaultStatus }
   ]
 })
 </script>
@@ -107,9 +100,9 @@ const statusItems = computed(() => {
 .status-slash {
   width: 4px;
   height: 14px;
-  background-color: #ef4444; /* 默认红色 */
+  background-color: #64748b; /* 未确认状态默认中性灰 */
   transform: skewX(-20deg);
-  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6); /* 增加发光 */
+  box-shadow: none;
   transition: all 0.3s ease;
 }
 
@@ -128,6 +121,22 @@ const statusItems = computed(() => {
 .module-item.error .status-slash {
   background-color: #ef4444;
   box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+.module-item.muted .status-slash {
+  background-color: #64748b;
+  box-shadow: none;
+}
+
+.module-item.muted .module-name {
+  color: #94a3b8;
+}
+
+.module-freshness {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 11px;
+  text-align: center;
 }
 
 .module-name {

@@ -94,11 +94,11 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { useMqttDataStore } from '../../store/modules/mqtt_data'
-import { BuffType, PenaltyType } from '../../utils/mqtt_protocol_constants'
+import { useTelemetryView } from '@/composables/useTelemetryView'
+import { BuffType, PenaltyType } from '@/composables/useTelemetryView'
 
 // ==================== Store ====================
-const mqttStore = useMqttDataStore()
+const telemetry = useTelemetryView()
 
 // ==================== 状态 ====================
 const activeTab = ref<'robot' | 'system'>('robot')
@@ -120,22 +120,22 @@ let messageIdCounter = 0
 // ==================== 计算属性 ====================
 // 当前机器人数据
 const currentRobot = computed(() => {
-  const robotId = mqttStore.currentRobotId
+  const robotId = telemetry.currentRobotId
   if (robotId > 100) {
-    return mqttStore.blueRobots.get(robotId)
+    return telemetry.blueRobots.get(robotId)
   } else {
-    return mqttStore.redRobots.get(robotId)
+    return telemetry.redRobots.get(robotId)
   }
 })
 
 // 当前机器人的 Buff（过滤当前机器人）
 const activeBuffs = computed(() => {
-  const robotId = mqttStore.currentRobotId
-  return mqttStore.activeBuffs.filter((b) => b.robotId === robotId && b.buffLeftTime > 0)
+  const robotId = telemetry.currentRobotId
+  return telemetry.activeBuffs.filter((b) => b.robotId === robotId && b.buffLeftTime > 0)
 })
 
 // 当前判罚信息
-const currentPenalty = computed(() => mqttStore.penaltyInfo)
+const currentPenalty = computed(() => telemetry.penaltyInfo)
 
 // 是否有判罚（用于检测判罚状态）
 const hasPenalty = computed(() => {
@@ -283,9 +283,9 @@ function scrollToBottom(): void {
 // ==================== 监听状态变化 ====================
 // 监听 Buff 变化
 watch(
-  () => mqttStore.activeBuffs,
+  () => telemetry.activeBuffs,
   (newBuffs, oldBuffs) => {
-    const robotId = mqttStore.currentRobotId
+    const robotId = telemetry.currentRobotId
     // 检测新获得的 Buff
     for (const buff of newBuffs) {
       if (buff.robotId !== robotId) continue
@@ -302,7 +302,7 @@ watch(
 
 // 监听判罚变化
 watch(
-  () => mqttStore.penaltyInfo,
+  () => telemetry.penaltyInfo,
   (newPenalty, oldPenalty) => {
     if (newPenalty && newPenalty.penaltyType > 0) {
       if (!oldPenalty || oldPenalty.penaltyType !== newPenalty.penaltyType) {

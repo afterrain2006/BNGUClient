@@ -5,6 +5,9 @@
   "author": "JNU-Shark",
   "type": "module",
   "scripts": {
+    "typecheck": "vue-tsc --noEmit",
+    "test": "node scripts/run-tests.mjs",
+    "check": "npm run typecheck && npm test && npm run verify:mqtt-proto",
     "predev": "npm run generate:mqtt-proto",
     "dev": "vite",
     "prebuild": "npm run generate:mqtt-proto",
@@ -39,6 +42,7 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "js-yaml": "^4.1.1",
+    "long": "^5.3.2",
     "lz4js": "^0.2.0",
     "mqtt": "^5.15.1",
     "pinia": "^3.0.4",
@@ -54,6 +58,7 @@
     "@types/node": "^25.5.2",
     "@types/three": "^0.183.1",
     "@vitejs/plugin-vue": "^5.2.1",
+    "esbuild": "^0.25.12",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
     "vue-tsc": "^2.1.10"

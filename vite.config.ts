@@ -44,7 +44,7 @@ export default defineConfig(async () => ({
 
           if (
             normalizedId.endsWith('/src/api-shim.ts') ||
-            normalizedId.endsWith('/src/utils/mqtt_protocol.ts') ||
+            normalizedId.includes('/src/rules/rm2026/') ||
             normalizedId.endsWith('/src/generated/mqtt-proto.json')
           ) {
             return 'mqtt-runtime'

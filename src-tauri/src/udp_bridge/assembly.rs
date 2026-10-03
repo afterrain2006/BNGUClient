@@ -132,6 +132,11 @@ impl FrameAssembly {
     }
 
     #[inline]
+    pub(super) fn elapsed(&self) -> Duration {
+        self.first_seen.elapsed()
+    }
+
+    #[inline]
     pub(super) fn payload(&self) -> &[u8] {
         let payload_len = self.received_bytes.min(self.total_size) as usize;
         let end = self.payload_offset + payload_len;
@@ -240,6 +245,9 @@ pub(super) fn drop_in_flight_frame(
 ) {
     if let Some(frame) = assemblies.remove(&frame_number) {
         stats.dropped_frames.fetch_add(1, Ordering::Relaxed);
+        stats
+            .dropped_incomplete_frames
+            .fetch_add(1, Ordering::Relaxed);
         pool.release(frame.recycle_buffer());
     }
     frame_order.retain(|value| *value != frame_number);

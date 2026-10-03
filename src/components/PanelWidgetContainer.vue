@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useWidgetStylesStore, type WidgetStyle } from '../store/modules/widget-styles'
-import { useMqttDataStore } from '../store/modules/mqtt_data'
+import { useTelemetryView } from '@/composables/useTelemetryView'
 import DataBar from './Shared/Styles/DataBar.vue'
 import DataRing from './Shared/Styles/DataRing.vue'
 import DataNumber from './Shared/Styles/DataNumber.vue'
@@ -45,7 +45,7 @@ const props = defineProps({
 const emit = defineEmits(['widget-selected', 'widget-deleted', 'widgets-updated'])
 
 const widgetStylesStore = useWidgetStylesStore()
-const mqttDataStore = useMqttDataStore()
+const telemetry = useTelemetryView()
 const widgets = ref<WidgetInstance[]>([])
 const selectedWidgetId = ref<string | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -190,8 +190,8 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
   )
 
   // ==================== 特殊机制 (GlobalSpecialMechanism) ====================
-  if (mqttDataStore.specialMechanisms.mechanismId.length > 0) {
-    mqttDataStore.specialMechanisms.mechanismId.forEach((id, index) => {
+  if (telemetry.specialMechanisms.mechanismId.length > 0) {
+    telemetry.specialMechanisms.mechanismId.forEach((id, index) => {
       options.push({
         label: `⚙️ 特殊机制${index + 1}`,
         value: `specialMechanisms.mechanismTimeSec[${index}]`,
@@ -201,7 +201,7 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
   }
 
   // ==================== 红队机器人数据 ====================
-  mqttDataStore.redRobotList.forEach((robot) => {
+  telemetry.redRobotList.forEach((robot) => {
     const prefix = `robot.red.${robot.robotId}`
     options.push(
       {
@@ -262,7 +262,7 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
       {
         label: `🔴 红${robot.robotId} - 机器人类型`,
         value: `${prefix}.robotType`,
-        description: `机器人类型编号`
+        description: `配置中的机器人类型名称`
       },
       {
         label: `🔴 红${robot.robotId} - 脱战状态`,
@@ -303,7 +303,7 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
   })
 
   // ==================== 蓝队机器人数据 ====================
-  mqttDataStore.blueRobotList.forEach((robot) => {
+  telemetry.blueRobotList.forEach((robot) => {
     const prefix = `robot.blue.${robot.robotId}`
     options.push(
       {
@@ -364,7 +364,7 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
       {
         label: `🔵 蓝${robot.robotId} - 机器人类型`,
         value: `${prefix}.robotType`,
-        description: `机器人类型编号`
+        description: `配置中的机器人类型名称`
       },
       {
         label: `🔵 蓝${robot.robotId} - 脱战状态`,
@@ -405,7 +405,7 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
   })
 
   // ==================== Buff状态 ====================
-  mqttDataStore.activeBuffs.forEach((buff, index) => {
+  telemetry.activeBuffs.forEach((buff, index) => {
     options.push({
       label: `✨ Buff${index + 1} - 剩余时间`,
       value: `activeBuffs[${index}].buffLeftTime`,
@@ -414,7 +414,7 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
   })
 
   // ==================== 判罚信息 (PenaltyInfo) ====================
-  if (mqttDataStore.penaltyInfo) {
+  if (telemetry.penaltyInfo) {
     options.push(
       {
         label: '⚠️ 判罚类型',
@@ -430,7 +430,7 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
   }
 
   // ==================== 雷达检测数据 (RaderInfoToClient) ====================
-  mqttDataStore.radarDetections.forEach((_detection, index) => {
+  telemetry.radarDetections.forEach((_detection, index) => {
     options.push(
       {
         label: `📡 雷达${index + 1} - 目标ID`,
@@ -451,7 +451,7 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
   })
 
   // ==================== 哨兵状态 (SentinelStatusSync) ====================
-  if (mqttDataStore.sentinelStatus) {
+  if (telemetry.sentinelStatus) {
     options.push(
       {
         label: '🤖 哨兵姿态',
@@ -467,24 +467,21 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
   }
 
   // ==================== 科技核心状态 (TechCoreMotionStateSync) ====================
-  // 注意：此数据需要从 mqttDataStore 中添加对应字段
-  // TODO: 在 mqtt_data.ts 中添加 techCoreStatus 字段
+  // 数据已由 RobotState.systems.engineering 保存。
 
   // ==================== 性能体系状态 (RobotPerformanceSelectionSync) ====================
   // 注意：此数据已包含在 RobotStaticStatus 中
   // performance_system_shooter 和 performance_system_chassis
 
   // ==================== 英雄部署模式状态 (DeployModeStatusSync) ====================
-  // 注意：此数据需要从 mqttDataStore 中添加对应字段
-  // TODO: 在 mqtt_data.ts 中添加 deployModeStatus 字段
+  // 数据已由 RobotState.systems.deployment 保存。
 
   // ==================== 飞镖目标状态 (DartSelectTargetStatusSync) ====================
-  // 注意：此数据需要从 mqttDataStore 中添加对应字段
-  // TODO: 在 mqtt_data.ts 中添加 dartTargetStatus 字段
+  // 数据已由 RobotState.systems.dart 保存。
 
   // ==================== 机器人受伤统计 (RobotInjuryStat) ====================
-  mqttDataStore.allRobots.forEach((robot) => {
-    const injuryStat = mqttDataStore.injuryStats.get(robot.robotId)
+  telemetry.allRobots.forEach((robot) => {
+    const injuryStat = telemetry.injuryStats.get(robot.robotId)
     if (injuryStat) {
       const prefix = `injuryStats.${robot.robotId}`
       const teamLabel = robot.team === 'red' ? '🔴' : '🔵'
@@ -519,8 +516,8 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
   })
 
   // ==================== 机器人复活状态 (RobotRespawnStatus) ====================
-  mqttDataStore.allRobots.forEach((robot) => {
-    const respawn = mqttDataStore.respawnStatus.get(robot.robotId)
+  telemetry.allRobots.forEach((robot) => {
+    const respawn = telemetry.respawnStatus.get(robot.robotId)
     if (respawn) {
       const prefix = `respawnStatus.${robot.robotId}`
       const teamLabel = robot.team === 'red' ? '🔴' : '🔵'
@@ -555,7 +552,7 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
   })
 
   // ==================== 机器人模块状态 (RobotModuleStatus) ====================
-  mqttDataStore.allRobots.forEach((robot) => {
+  telemetry.allRobots.forEach((robot) => {
     if (robot.moduleStatus) {
       const prefix = `robot.${robot.team}.${robot.robotId}.moduleStatus`
       const teamLabel = robot.team === 'red' ? '🔴' : '🔵'
@@ -652,7 +649,7 @@ const generateMqttOptions = (): Array<{ label: string; value: string; descriptio
   )
 
   // ==================== 事件数据 ====================
-  if (mqttDataStore.recentEvents.length > 0) {
+  if (telemetry.recentEvents.length > 0) {
     options.push({
       label: '📢 最新事件',
       value: 'recentEvents[0].eventId',
@@ -1395,7 +1392,7 @@ const getMqttValue = (path: string): unknown => {
         const propPath = parts.slice(3).join('.')
 
         // 使用 store 方法获取机器人 (响应式)
-        const robot = mqttDataStore.getRobot(id)
+        const robot = telemetry.getRobot(id)
         if (!robot) return undefined
 
         return getObjectProperty(robot, propPath)
@@ -1406,11 +1403,11 @@ const getMqttValue = (path: string): unknown => {
     if (path.startsWith('stats.')) {
       const prop = path.substring(6) // remove 'stats.'
       // 直接在 store 上访问计算属性
-      return getObjectProperty(mqttDataStore, prop)
+      return getObjectProperty(telemetry, prop)
     }
 
     // 3. 处理标准路径 (gameStatus, etc.)
-    return getObjectProperty(mqttDataStore, path)
+    return getObjectProperty(telemetry, path)
   } catch (error) {
     console.error('[Widget] 获取 MQTT 数据失败:', path, error)
     return undefined

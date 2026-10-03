@@ -21,7 +21,7 @@
 import { watch, onUnmounted } from 'vue'
 import { useDashboardStore } from '@/store'
 import type { DetectionConfig, EncodeConfig } from './types'
-import type { Detection as StoreDetection } from '@/utils/mqtt_protocol'
+import type { Detection as StoreDetection } from '@/domain/vision/Detection'
 
 // ── Props / Emits ─────────────────────────────────────────────────────────────
 
@@ -107,7 +107,7 @@ function inferTeam(className: string): 'red' | 'blue' | 'neutral' {
   return 'neutral'
 }
 
-/** Rust 侧 Detection -> 前端 mqtt_protocol.Detection */
+/** Rust 侧 Detection -> 前端 Detection domain */
 interface RustDetection {
   bbox: [number, number, number, number]
   class_id: number
@@ -217,7 +217,7 @@ function toStoreDetections(raw: RustDetection[]): StoreDetection[] {
         ? (d.team as 'red' | 'blue' | 'neutral')
         : inferTeam(d.class_name)
     // DetectionOverlay.vue 消费者使用 snake_case + bbox 数组形式（原 AI Server 协议），
-    // 同时保留 camelCase 字段以兼容 mqtt_protocol.Detection 类型契约。
+    // 同时保留 camelCase 字段以符合 Detection domain 类型契约。
     return {
       bbox: [x1, y1, x2, y2],
       class_id: d.class_id,

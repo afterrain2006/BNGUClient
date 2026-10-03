@@ -2,7 +2,7 @@
 import { ref, watch, onMounted, onUnmounted, reactive, computed } from 'vue'
 import { useDashboardStore } from '@/store'
 import { storeToRefs } from 'pinia'
-import type { Detection as StoreDetection } from '@/utils/mqtt_protocol'
+import type { Detection as StoreDetection } from '@/domain/vision/Detection'
 
 // 获取 store
 const store = useDashboardStore()

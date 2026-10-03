@@ -11,6 +11,9 @@ use serde::Serialize;
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UdpStats {
+    pub assembled_frames: u32,
+    pub decoded_frames: u32,
+    pub dropped_incomplete_frames: u32,
     pub received_frames: u32,
     pub dropped_frames: u32,
     pub dropped_old_frames: u32,
@@ -24,10 +27,19 @@ pub struct UdpStats {
     pub decoded_height: u32,
     pub output_width: u32,
     pub output_height: u32,
+    pub assembly_latency_avg_ms: f64,
+    pub assembly_latency_max_ms: f64,
+    pub decode_queue_wait_avg_ms: f64,
+    pub decode_queue_wait_max_ms: f64,
+    pub decoder_call_avg_ms: f64,
+    pub decoder_call_max_ms: f64,
 }
 
 /// Lock-free statistics — avoids mutex contention on every packet.
 pub struct AtomicStats {
+    pub assembled_frames: AtomicU32,
+    pub decoded_frames: AtomicU32,
+    pub dropped_incomplete_frames: AtomicU32,
     pub received_frames: AtomicU32,
     pub dropped_frames: AtomicU32,
     pub dropped_old_frames: AtomicU32,
@@ -41,11 +53,23 @@ pub struct AtomicStats {
     pub decoded_height: AtomicU32,
     pub output_width: AtomicU32,
     pub output_height: AtomicU32,
+    assembly_latency_count: AtomicU64,
+    assembly_latency_total_us: AtomicU64,
+    assembly_latency_max_us: AtomicU64,
+    decode_queue_wait_count: AtomicU64,
+    decode_queue_wait_total_us: AtomicU64,
+    decode_queue_wait_max_us: AtomicU64,
+    decoder_call_count: AtomicU64,
+    decoder_call_total_us: AtomicU64,
+    decoder_call_max_us: AtomicU64,
 }
 
 impl Default for AtomicStats {
     fn default() -> Self {
         Self {
+            assembled_frames: AtomicU32::new(0),
+            decoded_frames: AtomicU32::new(0),
+            dropped_incomplete_frames: AtomicU32::new(0),
             received_frames: AtomicU32::new(0),
             dropped_frames: AtomicU32::new(0),
             dropped_old_frames: AtomicU32::new(0),
@@ -59,11 +83,67 @@ impl Default for AtomicStats {
             decoded_height: AtomicU32::new(0),
             output_width: AtomicU32::new(0),
             output_height: AtomicU32::new(0),
+            assembly_latency_count: AtomicU64::new(0),
+            assembly_latency_total_us: AtomicU64::new(0),
+            assembly_latency_max_us: AtomicU64::new(0),
+            decode_queue_wait_count: AtomicU64::new(0),
+            decode_queue_wait_total_us: AtomicU64::new(0),
+            decode_queue_wait_max_us: AtomicU64::new(0),
+            decoder_call_count: AtomicU64::new(0),
+            decoder_call_total_us: AtomicU64::new(0),
+            decoder_call_max_us: AtomicU64::new(0),
         }
     }
 }
 
 impl AtomicStats {
+    fn record_latency(
+        count: &AtomicU64,
+        total_us: &AtomicU64,
+        max_us: &AtomicU64,
+        duration: std::time::Duration,
+    ) {
+        let value_us = duration.as_micros().min(u64::MAX as u128) as u64;
+        count.fetch_add(1, Ordering::Relaxed);
+        total_us.fetch_add(value_us, Ordering::Relaxed);
+        max_us.fetch_max(value_us, Ordering::Relaxed);
+    }
+
+    pub(super) fn record_assembly_latency(&self, duration: std::time::Duration) {
+        Self::record_latency(
+            &self.assembly_latency_count,
+            &self.assembly_latency_total_us,
+            &self.assembly_latency_max_us,
+            duration,
+        );
+    }
+
+    pub(super) fn record_decode_queue_wait(&self, duration: std::time::Duration) {
+        Self::record_latency(
+            &self.decode_queue_wait_count,
+            &self.decode_queue_wait_total_us,
+            &self.decode_queue_wait_max_us,
+            duration,
+        );
+    }
+
+    pub(super) fn record_decoder_call(&self, duration: std::time::Duration) {
+        Self::record_latency(
+            &self.decoder_call_count,
+            &self.decoder_call_total_us,
+            &self.decoder_call_max_us,
+            duration,
+        );
+    }
+
+    fn latency_avg_ms(count: &AtomicU64, total_us: &AtomicU64) -> f64 {
+        let count = count.load(Ordering::Relaxed);
+        if count == 0 {
+            return 0.0;
+        }
+        total_us.load(Ordering::Relaxed) as f64 / count as f64 / 1000.0
+    }
+
     pub(super) fn set_decoder_backend(&self, backend_name: &str) {
         let code = if backend_name.starts_with("internal") {
             1
@@ -103,6 +183,9 @@ impl AtomicStats {
         .to_string();
 
         UdpStats {
+            assembled_frames: self.assembled_frames.load(Ordering::Relaxed),
+            decoded_frames: self.decoded_frames.load(Ordering::Relaxed),
+            dropped_incomplete_frames: self.dropped_incomplete_frames.load(Ordering::Relaxed),
             received_frames: self.received_frames.load(Ordering::Relaxed),
             dropped_frames: self.dropped_frames.load(Ordering::Relaxed),
             dropped_old_frames: self.dropped_old_frames.load(Ordering::Relaxed),
@@ -116,10 +199,30 @@ impl AtomicStats {
             decoded_height: self.decoded_height.load(Ordering::Relaxed),
             output_width: self.output_width.load(Ordering::Relaxed),
             output_height: self.output_height.load(Ordering::Relaxed),
+            assembly_latency_avg_ms: Self::latency_avg_ms(
+                &self.assembly_latency_count,
+                &self.assembly_latency_total_us,
+            ),
+            assembly_latency_max_ms: self.assembly_latency_max_us.load(Ordering::Relaxed) as f64
+                / 1000.0,
+            decode_queue_wait_avg_ms: Self::latency_avg_ms(
+                &self.decode_queue_wait_count,
+                &self.decode_queue_wait_total_us,
+            ),
+            decode_queue_wait_max_ms: self.decode_queue_wait_max_us.load(Ordering::Relaxed) as f64
+                / 1000.0,
+            decoder_call_avg_ms: Self::latency_avg_ms(
+                &self.decoder_call_count,
+                &self.decoder_call_total_us,
+            ),
+            decoder_call_max_ms: self.decoder_call_max_us.load(Ordering::Relaxed) as f64 / 1000.0,
         }
     }
 
     pub(super) fn reset(&self) {
+        self.assembled_frames.store(0, Ordering::Relaxed);
+        self.decoded_frames.store(0, Ordering::Relaxed);
+        self.dropped_incomplete_frames.store(0, Ordering::Relaxed);
         self.received_frames.store(0, Ordering::Relaxed);
         self.dropped_frames.store(0, Ordering::Relaxed);
         self.dropped_old_frames.store(0, Ordering::Relaxed);
@@ -134,5 +237,14 @@ impl AtomicStats {
         self.decoded_height.store(0, Ordering::Relaxed);
         self.output_width.store(0, Ordering::Relaxed);
         self.output_height.store(0, Ordering::Relaxed);
+        self.assembly_latency_count.store(0, Ordering::Relaxed);
+        self.assembly_latency_total_us.store(0, Ordering::Relaxed);
+        self.assembly_latency_max_us.store(0, Ordering::Relaxed);
+        self.decode_queue_wait_count.store(0, Ordering::Relaxed);
+        self.decode_queue_wait_total_us.store(0, Ordering::Relaxed);
+        self.decode_queue_wait_max_us.store(0, Ordering::Relaxed);
+        self.decoder_call_count.store(0, Ordering::Relaxed);
+        self.decoder_call_total_us.store(0, Ordering::Relaxed);
+        self.decoder_call_max_us.store(0, Ordering::Relaxed);
     }
 }

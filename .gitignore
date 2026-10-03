@@ -23,6 +23,8 @@ flatpak/*.generated.yml
 .msys64/
 
 # Local Python / recovery artifacts
+SharkClient.rar
+bnguclient-field-test/
 .venv/
 __pycache__/
 .pytest_cache/

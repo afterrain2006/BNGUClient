@@ -18,7 +18,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useMqttDataStore } from '../../store/modules/mqtt_data'
+import { useTelemetryView } from '@/composables/useTelemetryView'
 
 interface Props {
   /** 地图图片路径 */
@@ -38,7 +38,7 @@ const props = withDefaults(defineProps<Props>(), {
   opacity: 1
 })
 
-const mqttStore = useMqttDataStore()
+const telemetry = useTelemetryView()
 const containerRef = ref<HTMLDivElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 let ctx: CanvasRenderingContext2D | null = null
@@ -168,8 +168,8 @@ const drawRobots = (canvasWidth: number, canvasHeight: number): void => {
   const robotSize = Math.min(canvasWidth, canvasHeight) * 0.04 // 机器人点的大小
 
   // 绘制红方机器人
-  mqttStore.redRobots.forEach((robot) => {
-    if (!robot.isAlive && robot.currentHealth <= 0) return
+  telemetry.redRobots.forEach((robot) => {
+    if (robot.poseUpdatedAt <= 0 || robot.isAlive === false || robot.x === undefined || robot.y === undefined) return
 
     const { x, y } = worldToCanvas(robot.x, robot.y, canvasWidth, canvasHeight)
 
@@ -195,8 +195,8 @@ const drawRobots = (canvasWidth: number, canvasHeight: number): void => {
   })
 
   // 绘制蓝方机器人
-  mqttStore.blueRobots.forEach((robot) => {
-    if (!robot.isAlive && robot.currentHealth <= 0) return
+  telemetry.blueRobots.forEach((robot) => {
+    if (robot.poseUpdatedAt <= 0 || robot.isAlive === false || robot.x === undefined || robot.y === undefined) return
 
     const { x, y } = worldToCanvas(robot.x, robot.y, canvasWidth, canvasHeight)
 

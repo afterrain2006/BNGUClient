@@ -144,9 +144,9 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, reactive } from 'vue'
-import { useMqttDataStore } from '../store/modules/mqtt_data'
+import { useTelemetryView } from '@/composables/useTelemetryView'
 import { onMessage, onDismiss, type GlobalMessage } from '../store/modules/message_service'
-import { CurrentStage } from '../utils/mqtt_protocol_constants'
+import { CurrentStage } from '@/composables/useTelemetryView'
 
 // ==================== 类型定义 ====================
 type MessageLevel = 'info' | 'warning' | 'danger'
@@ -211,29 +211,29 @@ interface MessageYamlConfig {
 }
 
 // ==================== Store ====================
-const mqttStore = useMqttDataStore()
+const telemetry = useTelemetryView()
 
 // ==================== 复活状态 ====================
 const respawnStatus = reactive({
   isPendingRespawn: false,
-  totalRespawnProgress: 100,
+  totalRespawnProgress: 0,
   currentRespawnProgress: 0,
-  canFreeRespawn: true,
-  goldCostForRespawn: 50,
-  canPayForRespawn: true
+  canFreeRespawn: false,
+  goldCostForRespawn: 0,
+  canPayForRespawn: false
 })
 
 // 检查是否在比赛中 (FIGHTING 阶段)
 const isInMatch = computed(() => {
   // CurrentStage.FIGHTING = 4
-  return mqttStore.gameStatus.currentStage === 4
+  return telemetry.gameStatus.currentStage === 4
 })
 
 // 检查当前机器人是否阵亡（从 RobotStaticStatus 中获取）
 const isCurrentRobotDead = computed(() => {
-  const robotId = mqttStore.currentRobotId
+  const robotId = telemetry.currentRobotId
   if (!robotId) return false
-  const robot = mqttStore.getRobot(robotId)
+  const robot = telemetry.getRobot(robotId)
   return robot?.isAlive === false
 })
 
@@ -265,7 +265,7 @@ const respawnProgressPercent = computed(() => {
 })
 
 const canConfirmRespawn = computed(() => {
-  return respawnStatus.currentRespawnProgress >= respawnStatus.totalRespawnProgress
+  return respawnStatus.totalRespawnProgress > 0 && respawnStatus.currentRespawnProgress >= respawnStatus.totalRespawnProgress
 })
 
 // 格式化复活时间 (秒数)
@@ -294,26 +294,26 @@ const handleConfirmRespawn = (): void => {
 
 // 更新复活状态
 const updateRespawnStatus = (): void => {
-  const robotId = mqttStore.currentRobotId
-  const status = mqttStore.getRobotRespawnStatus(robotId)
+  const robotId = telemetry.currentRobotId
+  const status = telemetry.getRobotRespawnStatus(robotId)
 
   if (status) {
     // 有 MQTT RespawnStatus 数据，使用它
-    respawnStatus.isPendingRespawn = status.isPendingRespawn
-    respawnStatus.totalRespawnProgress = status.totalRespawnProgress
-    respawnStatus.currentRespawnProgress = status.currentRespawnProgress
-    respawnStatus.canFreeRespawn = status.canFreeRespawn
-    respawnStatus.goldCostForRespawn = status.goldCostForRespawn
-    respawnStatus.canPayForRespawn = status.canPayForRespawn
+    respawnStatus.isPendingRespawn = status.isPendingRespawn ?? false
+    respawnStatus.totalRespawnProgress = status.totalRespawnProgress ?? 0
+    respawnStatus.currentRespawnProgress = status.currentRespawnProgress ?? 0
+    respawnStatus.canFreeRespawn = status.canFreeRespawn ?? false
+    respawnStatus.goldCostForRespawn = status.goldCostForRespawn ?? 0
+    respawnStatus.canPayForRespawn = status.canPayForRespawn ?? false
   } else {
     // 没有 MQTT RespawnStatus 数据，重置状态
     // 不再模拟复活进度，完全依赖服务器数据
     respawnStatus.isPendingRespawn = false
-    respawnStatus.totalRespawnProgress = 100
+    respawnStatus.totalRespawnProgress = 0
     respawnStatus.currentRespawnProgress = 0
-    respawnStatus.canFreeRespawn = true
-    respawnStatus.goldCostForRespawn = 50
-    respawnStatus.canPayForRespawn = true
+    respawnStatus.canFreeRespawn = false
+    respawnStatus.goldCostForRespawn = 0
+    respawnStatus.canPayForRespawn = false
   }
 }
 
@@ -419,19 +419,19 @@ const addMessage = (msgConfig: MessageConfig): void => {
       newMessage.localTimerPaused = false
     } else {
       // 准备阶段：从服务器数据初始化
-      const serverCountdown = mqttStore.gameStatus.stageCountdownSec
+      const serverCountdown = telemetry.gameStatus.stageCountdownSec
       newMessage.localTimer = serverCountdown
       newMessage.countdown = serverCountdown
       newMessage.lastSyncTime = now
-      newMessage.localTimerPaused = mqttStore.gameStatus.isPaused
+      newMessage.localTimerPaused = telemetry.gameStatus.isPaused
     }
   } else if (msgConfig.specialType === 'gameStageElapsed' && msgConfig.progressPath) {
     // 自检阶段：初始化已过时间
-    const serverElapsed = mqttStore.gameStatus.stageElapsedSec
+    const serverElapsed = telemetry.gameStatus.stageElapsedSec
     newMessage.localTimer = serverElapsed
     newMessage.countdown = serverElapsed
     newMessage.lastSyncTime = now
-    newMessage.localTimerPaused = mqttStore.gameStatus.isPaused
+    newMessage.localTimerPaused = telemetry.gameStatus.isPaused
   }
 
   if (msgConfig.specialType?.startsWith('gameStage')) {
@@ -495,13 +495,13 @@ const updateMessagePositions = (): void => {
 // ==================== 获取 MQTT 值 ====================
 const getMqttValue = (path: string): unknown => {
   const parts = path.split('.')
-  let value: unknown = mqttStore
+  let value: unknown = telemetry
 
   // 处理 currentRobot 前缀
   if (parts[0] === 'currentRobot') {
-    const robotId = mqttStore.currentRobotId
+    const robotId = telemetry.currentRobotId
     const robot =
-      robotId > 100 ? mqttStore.blueRobots.get(robotId) : mqttStore.redRobots.get(robotId)
+      robotId > 100 ? telemetry.blueRobots.get(robotId) : telemetry.redRobots.get(robotId)
     if (!robot) return undefined
     value = robot
     parts.shift()
@@ -509,7 +509,7 @@ const getMqttValue = (path: string): unknown => {
 
   // 处理 penaltyInfo 路径 - 直接从 store 获取
   if (parts[0] === 'penaltyInfo') {
-    value = mqttStore.penaltyInfo
+    value = telemetry.penaltyInfo
     parts.shift()
   }
 
@@ -561,10 +561,10 @@ let lastPausedState: boolean | null = null
 
 // ==================== 更新实时数据 ====================
 const updateRealtimeData = (): void => {
-  const currentStage = mqttStore.gameStatus.currentStage
-  const serverCountdown = mqttStore.gameStatus.stageCountdownSec
-  const serverElapsed = mqttStore.gameStatus.stageElapsedSec
-  const isPaused = mqttStore.gameStatus.isPaused
+  const currentStage = telemetry.gameStatus.currentStage
+  const serverCountdown = telemetry.gameStatus.stageCountdownSec
+  const serverElapsed = telemetry.gameStatus.stageElapsedSec
+  const isPaused = telemetry.gameStatus.isPaused
   const now = Date.now()
 
   // 检测服务器数据是否更新（用于同步）
@@ -734,7 +734,7 @@ const updateRealtimeData = (): void => {
 const checkGameStageMessages = (): void => {
   if (!config.value) return
 
-  const currentStage = mqttStore.gameStatus.currentStage as number
+  const currentStage = telemetry.gameStatus.currentStage as number
 
   // 注意：准备阶段和自检阶段的暂停处理已在 updateRealtimeData 中完成
   // 这里只处理阶段切换逻辑

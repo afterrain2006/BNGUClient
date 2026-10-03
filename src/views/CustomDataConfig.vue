@@ -40,7 +40,7 @@
           <div class="meta-item">
             <span class="meta-label">数据模式</span>
             <span class="meta-value mode-badge" :class="modeClass">
-              {{ currentRobotData.mode === 0 ? '纯数据模式' : '图像数据模式' }}
+              {{ currentRobotData.mode === 0 ? '纯数据模式' : currentRobotData.mode === 1 ? '图像数据模式' : '原始数据（未解析）' }}
             </span>
           </div>
           <div class="meta-item">
@@ -52,6 +52,11 @@
             <span class="meta-value">{{ lastUpdateTime }}</span>
           </div>
         </div>
+      </div>
+
+      <div v-if="currentRobotData.mode === undefined" class="fields-section">
+        <p>已收到原始字节流；当前自定义内容解析接口尚未实现。</p>
+        <code>{{ currentRobotData.rawBuffer?.map(value => value.toString(16).padStart(2, '0')).join(' ') }}</code>
       </div>
 
       <!-- 纯数据模式字段 -->
@@ -276,9 +281,11 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { useMqttDataStore } from '@/store/modules/mqtt_data'
+import { useCustomDataStore } from '@/stores/customDataStore'
+import { useRobotSelectionStore } from '@/stores/robotSelectionStore'
 
-const mqttDataStore = useMqttDataStore()
+const customData = useCustomDataStore()
+const selection = useRobotSelectionStore()
 
 // ==================== 图像块收集器 ====================
 interface ImageBlockData {
@@ -307,37 +314,20 @@ const assemblingImageIds = new Set<number>()
 // UI 更新计数器（用于触发模板重新渲染）
 const assembledImagesVersion = ref(0)
 
-// 强制创建对 customData 的响应式依赖
-const customDataSize = computed(() => mqttDataStore.customData.size)
-
-// 当前选中机器人的 ID（从 customData Map 获取第一个可用的 robotId）
-const currentRobotId = computed(() => {
-  // 通过访问 size 确保响应式依赖
-  const size = customDataSize.value
-  if (size === 0) {
-    return null
-  }
-
-  // 获取所有键并返回第一个
-  const keys = Array.from(mqttDataStore.customData.keys())
-  if (keys.length > 0) {
-    return keys[0]
-  }
-
-  return null
-})
+const currentRobotId = computed(() => selection.selectedRobotId > 0 ? selection.selectedRobotId : null)
 
 // 当前机器人的解析数据
 const currentRobotData = computed(() => {
   if (currentRobotId.value === null) {
     return undefined
   }
-  return mqttDataStore.customData.get(currentRobotId.value) as ParsedCustomData | undefined
+  return customData.data.get(currentRobotId.value) as ParsedCustomData | undefined
 })
 
 // 解析数据接口定义（根据实际解析结果）
 interface ParsedCustomData {
-  mode: number // 0 = 纯数据模式, 1 = 图像数据模式
+  mode?: number // 0 = 纯数据模式, 1 = 图像数据模式, undefined = 未解析的字节流
+  receivedAt?: number
   pureDataFields?: Record<string, unknown> // 纯数据模式字段
   companionField?: Record<string, unknown> // 图像模式伴随字段（单个对象）
   imageBlock?: {
@@ -355,17 +345,18 @@ const modeClass = computed(() => {
 
 const dataLength = computed(() => {
   // 优先从 rawBuffer 获取，其次从 imageData，默认 150
-  if (currentRobotData.value?.rawBuffer?.length) {
+  if (currentRobotData.value?.rawBuffer !== undefined) {
     return currentRobotData.value.rawBuffer.length
   }
-  if (currentRobotData.value?.imageData?.length) {
+  if (currentRobotData.value?.imageData !== undefined) {
     return currentRobotData.value.imageData.length
   }
-  return currentRobotData.value ? 150 : 0
+  return 0
 })
 
 const lastUpdateTime = computed(() => {
-  const now = new Date()
+  if (!currentRobotData.value?.receivedAt) return '—'
+  const now = new Date(currentRobotData.value.receivedAt)
   return now.toLocaleTimeString('zh-CN', { hour12: false })
 })
 
@@ -376,6 +367,7 @@ const companionFields = computed(() => {
   }
   const systemFields = [
     'mode',
+    'receivedAt',
     'imageData',
     'imageBlock',
     'rawBuffer',

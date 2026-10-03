@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useMqttDataStore } from '@/store/modules/mqtt_data'
+import { useTelemetryView } from '@/composables/useTelemetryView'
 
-const mqttStore = useMqttDataStore()
+const telemetry = useTelemetryView()
 
 const emit = defineEmits<{
   (e: 'purchase', amount: number): void
@@ -20,12 +20,12 @@ const lastClickTime = ref(0)
 const lastClickedAmount = ref<number | null>(null)
 
 // 从 MQTT 数据获取当前机器人信息
-const currentRobotId = computed(() => mqttStore.currentRobotId)
+const currentRobotId = computed(() => telemetry.currentRobotId)
 
 // 获取当前机器人数据
 const currentRobot = computed(() => {
   if (currentRobotId.value <= 0) return null
-  return mqttStore.getRobot(currentRobotId.value)
+  return telemetry.getRobot(currentRobotId.value)
 })
 
 // 是否可以远程补弹
@@ -35,7 +35,7 @@ const canRemoteAmmo = computed(() => {
 
 // 当前金币（从后勤状态获取）
 const currentGold = computed(() => {
-  return mqttStore.logisticsStatus.remainingEconomy ?? 0
+  return telemetry.logisticsStatus.remainingEconomy ?? 0
 })
 
 // 弹丸单价（假设每发 10 金币）

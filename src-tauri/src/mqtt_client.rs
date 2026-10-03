@@ -22,6 +22,20 @@ pub struct MqttStatusPayload {
     pub status: String,
     pub connected: bool,
     pub reconnect_attempt: u32,
+    pub client_id: Option<String>,
+    pub revision: u64,
+}
+
+impl Default for MqttStatusPayload {
+    fn default() -> Self {
+        Self {
+            status: "disconnected".to_string(),
+            connected: false,
+            reconnect_attempt: 0,
+            client_id: None,
+            revision: 0,
+        }
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -77,8 +91,7 @@ pub struct MqttStats {
 
 pub struct MqttState {
     pub client: Arc<Mutex<Option<AsyncClient>>>,
-    pub is_connected: Arc<Mutex<bool>>,
-    pub status: Arc<Mutex<String>>,
+    pub status: Arc<Mutex<MqttStatusPayload>>,
     pub subscriptions: Arc<Mutex<BTreeSet<String>>>,
     pub listen_task: Arc<Mutex<Option<JoinHandle<()>>>>,
     pub abort_handle: Arc<Notify>,
@@ -89,8 +102,7 @@ impl Default for MqttState {
     fn default() -> Self {
         Self {
             client: Arc::new(Mutex::new(None)),
-            is_connected: Arc::new(Mutex::new(false)),
-            status: Arc::new(Mutex::new("disconnected".to_string())),
+            status: Arc::new(Mutex::new(MqttStatusPayload::default())),
             subscriptions: Arc::new(Mutex::new(BTreeSet::new())),
             listen_task: Arc::new(Mutex::new(None)),
             abort_handle: Arc::new(Notify::new()),
@@ -111,23 +123,30 @@ fn qos_from_u8(value: u8) -> QoS {
 
 fn set_status(
     app: &AppHandle,
-    status: &Arc<Mutex<String>>,
-    is_connected: &Arc<Mutex<bool>>,
+    status: &Arc<Mutex<MqttStatusPayload>>,
     next_status: &str,
     reconnect_attempt: u32,
+    client_id: Option<&str>,
 ) {
     let connected = next_status == "connected";
-    *status.lock().unwrap() = next_status.to_string();
-    *is_connected.lock().unwrap() = connected;
-
-    let _ = app.emit(
-        "mqtt-status",
-        MqttStatusPayload {
+    let payload = {
+        let mut current = status.lock().unwrap();
+        let payload = MqttStatusPayload {
             status: next_status.to_string(),
             connected,
             reconnect_attempt,
-        },
-    );
+            client_id: if connected {
+                client_id.map(str::to_owned)
+            } else {
+                None
+            },
+            revision: current.revision.wrapping_add(1),
+        };
+        *current = payload.clone();
+        payload
+    };
+
+    let _ = app.emit("mqtt-status", payload);
 }
 
 fn emit_mqtt_message_batch(app: &AppHandle, pending_messages: &mut Vec<MqttMessagePayload>) {
@@ -199,7 +218,7 @@ pub async fn mqtt_connect(
         );
     }
 
-    set_status(&app, &state.status, &state.is_connected, "connecting", 0);
+    set_status(&app, &state.status, "connecting", 0, None);
 
     let client_id = config.client_id.clone().unwrap_or_else(|| {
         format!(
@@ -227,7 +246,6 @@ pub async fn mqtt_connect(
     let abort_notify = state.abort_handle.clone();
     let app_handle = app.clone();
     let status_state = state.status.clone();
-    let connected_state = state.is_connected.clone();
     let subscription_state = state.subscriptions.clone();
     let stats = state.stats.clone();
     let client_container = state.client.clone();
@@ -268,7 +286,7 @@ pub async fn mqtt_connect(
                                     let _ = tx.send(Ok(()));
                                 }
 
-                                set_status(&app_handle, &status_state, &connected_state, "connected", 0);
+                                set_status(&app_handle, &status_state, "connected", 0, Some(&client_id_for_task));
 
                                 let topics: Vec<String> = subscription_state
                                     .lock()
@@ -296,7 +314,7 @@ pub async fn mqtt_connect(
                             }
                             Ok(Event::Incoming(Incoming::Disconnect)) => {
                                 warn!("broker disconnected the client");
-                                set_status(&app_handle, &status_state, &connected_state, "disconnected", reconnect_attempt);
+                                set_status(&app_handle, &status_state, "disconnected", reconnect_attempt, None);
 
                                 if !has_connected_once {
                                     if let Some(tx) = initial_connect_tx.take() {
@@ -312,14 +330,14 @@ pub async fn mqtt_connect(
                                 warn!(%error, "event loop error");
 
                                 if !has_connected_once {
-                                    set_status(&app_handle, &status_state, &connected_state, "error", reconnect_attempt);
+                                    set_status(&app_handle, &status_state, "error", reconnect_attempt, None);
                                     if let Some(tx) = initial_connect_tx.take() {
                                         let _ = tx.send(Err(format!("MQTT connection failed: {error}")));
                                     }
                                     break 'outer;
                                 }
 
-                                set_status(&app_handle, &status_state, &connected_state, "reconnecting", reconnect_attempt);
+                                set_status(&app_handle, &status_state, "reconnecting", reconnect_attempt, None);
                                 break; // fall through to reconnect logic
                             }
                         }
@@ -337,9 +355,9 @@ pub async fn mqtt_connect(
             set_status(
                 &app_handle,
                 &status_state,
-                &connected_state,
                 "reconnecting",
                 reconnect_attempt,
+                None,
             );
 
             let wait = std::time::Duration::from_millis(reconnect_delay_ms);
@@ -374,12 +392,12 @@ pub async fn mqtt_connect(
         Ok(Ok(Ok(()))) => Ok(true),
         Ok(Ok(Err(error_message))) => {
             stop_existing_connection(&state).await;
-            set_status(&app, &state.status, &state.is_connected, "error", 0);
+            set_status(&app, &state.status, "error", 0, None);
             Err(error_message)
         }
         Ok(Err(_)) => {
             stop_existing_connection(&state).await;
-            set_status(&app, &state.status, &state.is_connected, "error", 0);
+            set_status(&app, &state.status, "error", 0, None);
             Err(
                 "MQTT connection attempt ended before the broker confirmed the session."
                     .to_string(),
@@ -387,7 +405,7 @@ pub async fn mqtt_connect(
         }
         Err(_) => {
             stop_existing_connection(&state).await;
-            set_status(&app, &state.status, &state.is_connected, "error", 0);
+            set_status(&app, &state.status, "error", 0, None);
             Err("MQTT connection timed out while waiting for broker acknowledgement.".to_string())
         }
     }
@@ -399,7 +417,7 @@ pub async fn mqtt_disconnect(
     state: tauri::State<'_, MqttState>,
 ) -> Result<bool, String> {
     stop_existing_connection(&state).await;
-    set_status(&app, &state.status, &state.is_connected, "disconnected", 0);
+    set_status(&app, &state.status, "disconnected", 0, None);
     Ok(true)
 }
 
@@ -533,13 +551,7 @@ pub async fn mqtt_unsubscribe(
 pub async fn mqtt_get_status(
     state: tauri::State<'_, MqttState>,
 ) -> Result<serde_json::Value, String> {
-    let connected = *state.is_connected.lock().unwrap();
-    let status = state.status.lock().unwrap().clone();
-
-    Ok(serde_json::json!({
-        "connected": connected,
-        "status": status,
-    }))
+    Ok(serde_json::json!(state.status.lock().unwrap().clone()))
 }
 
 #[tauri::command]

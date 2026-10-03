@@ -1,5 +1,7 @@
 # 项目记忆与对话记录恢复索引
 
+> 上游保留的历史索引，不是 BNGUClient 当前部署或架构说明；当前入口见 [README](../README.md) 和 [交付说明](development-handoff.md)。
+
 生成时间：2026-05-06
 
 ## 恢复结论

@@ -1,436 +1,148 @@
-# SharkClient
+# BNGUClient
 
-> RoboMaster 风格的多机器人地面站客户端 · Tauri 2 + Vue 3 + Rust · v1.0.0
+基于 [JNU-SHARK/SharkClient](https://github.com/JNU-SHARK/SharkClient) 渐进式重构的 RoboMaster 客户端，使用 Tauri 2、Vue 3、Pinia 和 Rust。
 
-SharkClient客户端整合了 UDP H.265 视频接收、HUD 自定义叠加、MQTT 双向协议、外置 AI 检测和多种打包形态，目标是提供一份从克隆到运行都能跑通的、面向 RoboMaster 的开源参考实现。
+本仓库是本次开发的收尾版本：遥测已切换到新数据链，键鼠采集与 RM2026 编码已分离，原有 HUD 和视频功能保留。它不是已完成官方赛事服务器和实机验收的承诺。上游作者信息和 GPL-3.0 许可证保留；部分二进制名、包名和资源中的 SharkClient 标识暂未改名，以免破坏既有构建和配置兼容性。
 
-本目录是 **v1.0.0 快照**。只需准备好 Node.js、Rust 工具链与平台依赖即可进入开发与构建流程。
+## 当前架构
 
-> 当前仓库随附 AI 检测后端源码包：
-> `SharkVisionLiteServer-open-source-v1.0.0-20260519.zip`
->
-> 该压缩包内容为 `SharkVisionLiteServer/` 目录的 v1.0.0 公开源码发行版，
-> 包含 Python 推理服务、ONNX 模型、TensorRT 工具脚本、INT8 校准图片和完整 README。
-
----
-
-## 目录
-
-- [核心特性](#核心特性)
-- [系统架构](#系统架构)
-- [仓库结构](#仓库结构)
-- [环境要求](#环境要求)
-- [快速上手](#快速上手)
-- [构建与运行](#构建与运行)
-- [资源配置](#资源配置)
-- [可选能力](#可选能力)
-- [发行打包](#发行打包)
-- [协议生成与验证](#协议生成与验证)
-- [已知限制与 FAQ](#已知限制与-faq)
-- [贡献指南](#贡献指南)
-- [版本与变更](#版本与变更)
-- [许可证](#许可证)
-- [致谢](#致谢)
-
----
-
-## 核心特性
-
-- **UDP H.265 视频管线**：自定义分包/组帧协议，1080P 流可稳定接收；解码层主动丢弃积压旧帧，优先呈现最新画面，避免端到端延迟累积。
-- **多解码后端**：默认走 WebCodecs 浏览器内解码，桌面端可切换 Rust 侧 libde265 软解或可选 GPU 路径，能在没有硬件加速的低性能机器上回退运行。
-- **MQTT 双向协议**：基于 `messages.proto` 自动生成强类型前端 JSON Schema；裁判系统状态、控制指令、自定义数据块均按消息名解析与发送。
-- **可定制 HUD 系统**：XML 描述 + Vue 渲染，预置准星、边框、血量指示器、警告区域、视频缩放状态等组件，可在运行时编辑布局与样式。
-- **外置 AI 检测**：检测服务作为独立 Python 进程接入，通过 Windows Named Pipe / Linux Unix Socket 传控制信息，帧数据走共享内存零拷贝；可热启停、可换模型。
-- **多发行形态**：单一源码可产出 Windows lite/mini/single 三档安装包、Linux tar.gz 与 Flatpak，按目标平台与依赖完整性按需选择。
-- **跨平台一致**：Windows 10/11 与 Ubuntu 22.04+ 是主测平台；CI 工作流位于 `.github/workflows/ci.yml`。
-
----
-
-## 系统架构
-
-```
-                              ┌────────────────────────────────────────┐
-                              │            操作员（前端 UI）            │
-                              │   Vue 3 + Pinia + WebCodecs/Canvas     │
-                              └──────────────┬─────────────────────────┘
-                                             │ Tauri IPC / events
-                              ┌──────────────┴─────────────────────────┐
-                              │             Tauri 2 Runtime            │
-                              │           (Rust async backend)         │
-                              ├─────────────┬───────────────┬──────────┤
-                              │  UDP Bridge │ Video Decoder │  MQTT    │
-                              │  ─────────  │   ─────────   │  ──────  │
-                              │  分片组帧    │  libde265 软解 │ rumqttc │
-                              │  MJPEG 兼容 │ 内嵌精简ffmpeg │ proto-  │
-                              │  统计监控    │  丢旧帧策略    │ 强类型   │
-                              └──────┬──────┴───────┬───────┴────┬─────┘
-                                     │              │             │
-                          UDP 视频流  │     SHM 帧   │  MQTT TCP   │
-                                     ▼              ▼             ▼
-                              ┌──────────────┐ ┌─────────────┐ ┌──────────┐
-                              │  机器人/裁判  │ │ Python 检测 │ │  Broker  │
-                              │  视频发送端   │ │  外置服务   │ │          │
-                              └──────────────┘ └─────────────┘ └──────────┘
+```mermaid
+flowchart LR
+    Broker[MQTT Broker] --> Rust[Rust MQTT]
+    Rust --> Adapter[Tauri mqttAdapter]
+    Adapter --> Raw[RawMqttMessage]
+    Raw --> Runner[mqttRuleRunner]
+    Runner --> Rule[RM2026 Rule]
+    Rule --> Updates[ClientUpdate]
+    Updates --> Robots[robotStore / RobotState]
+    Updates --> Match[matchStore / MatchState]
+    Updates --> Custom[customDataInput / customDataStore]
+    Robots --> UI[Dashboard / HUD]
+    Match --> UI
+    Custom --> UI
+    Input[键鼠采集] --> Generic[OperatorInput]
+    Generic --> Sender[controlSender]
+    Sender --> Control[可替换控制规则]
+    Control --> Bytes[MQTT topic / bytes]
+    Bytes --> Adapter
 ```
 
-三条主线在后端互相解耦：
+- 入站：只有一条遥测入口，旧 MQTT decoder、worker、mqtt_data 状态链已删除。
+- 规则：protobuf、RM2026 编号、单位、队伍顺序、键盘位图和鼠标协议方向在 `src/rules/rm2026/` 内转换。
+- 状态：机器人、比赛和自定义数据分别存储；UI 选择不改变 MQTT 路由身份。
+- 身份：已建立 MQTT 连接的数字 Client ID 决定本机机器人；StaticStatus 校验身份，不能静默更换身份。
+- 操控：内部表达键、鼠标位移和按钮状态，不定义“前进速度”“发射”等机器人动作。具体动作仍由电控实现。
+- 视频：独立 UDP 图传链，不经过 MQTT 遥测规则。H.265 在 Rust 侧解码，桌面前端显示本地 MJPEG；并非默认 WebCodecs 解码。
 
-1. **UDP 视频线**：`src-tauri/src/udp_bridge/` 负责接收、分片重组、码流嗅探（H.265 / MJPEG）和统计。组好的帧推到前端或共享内存。
-2. **解码线**：`src-tauri/src/video_decoder/` 提供 `native`（libde265 vendored 源码软解）与 `gpu` 两种实现，前端首选 WebCodecs（已废弃）；解码过程主动丢弃积压旧帧。
-3. **MQTT 控制线**：`src-tauri/src/mqtt_client/` 基于 rumqttc，与前端 `src/mqtt/` 共同完成 proto → JSON Schema → Vue store 的端到端类型化数据流。
-
-外置 AI 检测通过 `scripts/detection_pipe_server.py` 启动，Pipe / Socket 只承载控制 JSON，帧数据由 `src-tauri/src/shm_bridge.rs` 写入共享内存，避免大数组在 IPC 层来回拷贝。
-
----
+完整边界和生命周期说明见 [架构文档](docs/telemetry-architecture.md)，现场检查见 [交付说明](docs/development-handoff.md)。
 
 ## 仓库结构
 
-| 路径 | 说明 |
+| 路径 | 职责 |
 | --- | --- |
-| `src/` | Vue 3 前端：视图、组件、Pinia store、MQTT/解码 Worker、生成代码 |
-| `src/views/` | `Dashboard`、`Settings`、`Telemetry`、`CustomDataConfig` 等顶层视图 |
-| `src/components/` | HUD 元素、控制面板、状态条等 UI 单元 |
-| `src/store/modules/` | `mqtt_data`、`dashboard`、`hud-templates` 等状态切片 |
-| `src/generated/mqtt-proto.json` | 由 proto 编译得到的协议 JSON，**仓库已预生成** |
-| `src-tauri/` | Rust/Tauri 后端工程 |
-| `src-tauri/src/udp_bridge/` | UDP 接收、组帧、MJPEG 兼容、统计 |
-| `src-tauri/src/video_decoder/` | libde265 软解 (`native.rs`) 与 GPU 路径 (`gpu.rs`) |
-| `src-tauri/src/mqtt_client/` | MQTT 客户端封装 |
-| `src-tauri/src/shm_bridge.rs` | AI 检测共享内存桥 |
-| `src-tauri/vendor/libde265/` | H.265 解码库 vendored 源码（必需，构建时编译） |
-| `resources/` | 运行时资源：地图、HUD 模板、配置、proto |
-| `scripts/` | 构建、打包、依赖下载、AI 辅助脚本 |
-| `SharkVisionLiteServer-open-source-v1.0.0-20260519.zip` | AI 检测后端 v1.0.0 公开源码发行包，解压后可重命名为 `AI Server/` |
-| `flatpak/` | Linux Flatpak 打包描述（可选） |
-| `docs/` | UDP 低延迟优化笔记等设计文档 |
-| `.github/workflows/` | CI 工作流 |
+| `src/adaptor/tauri/` | 桌面运行时与 MQTT 原始字节适配 |
+| `src/contracts/` | 通用原始消息、增量更新、操作员输入和出站消息契约 |
+| `src/rules/` | 通用规则契约；`rm2026/` 实现赛事协议转换 |
+| `src/input/` | 遥测分发、连接生命周期、自定义数据解析接入 |
+| `src/output/` | 控制输入发送、合并待发送输入、连接切换清理 |
+| `src/domain/` | 机器人、比赛和检测领域数据 |
+| `src/stores/` | 遥测状态、连接元数据和 UI 选择 |
+| `src/store/` | 保留的 Dashboard/HUD 等界面配置状态，不是旧遥测链 |
+| `src/composables/` | UI 遥测投影与新鲜度时钟 |
+| `src/views/`、`src/components/` | 视图、HUD、输入采集、视频显示 |
+| `src-tauri/` | Rust MQTT、UDP 组帧、解码、共享内存与桌面接口 |
+| `resources/` | 地图、机器人配置、HUD 模板、自定义协议样例 |
+| `UDP-MQTT Server/proto/messages.proto` | 已提交的 MQTT 协议源，生成与 Mock 共用 |
+| `tests/` | 遥测、身份、状态、架构边界和操控链回归测试 |
+| `tools/robot-state-preview/` | 状态灯和新鲜度 UI 预览，不接真实 MQTT |
+| `tools/rm2026-mock-server/` | 独立本地 MQTT / UDP 测试服务 |
+| `scripts/`、`.github/workflows/` | 生成、检查、构建、打包和 CI |
 
----
+## 开发运行
 
-## 环境要求
-
-| 组件 | 最低版本 | 说明 |
-| --- | --- | --- |
-| Node.js | 20 LTS | 推荐使用 nvm / fnm 管理 |
-| npm | 10+ | 随 Node 自带 |
-| Rust | stable (>=1.78) | 通过 `rustup` 安装 |
-| Windows | 10 / 11 | 需 Microsoft Edge WebView2 Runtime |
-| Linux | Ubuntu 22.04+ | 需 WebKitGTK 4.1、GTK 3、libsoup 3、patchelf |
-
-Linux 系统依赖一行装齐：
-
-```bash
-sudo apt-get update
-sudo apt-get install -y \
-  libwebkit2gtk-4.1-dev \
-  libgtk-3-dev \
-  libsoup-3.0-dev \
-  libjavascriptcoregtk-4.1-dev \
-  librsvg2-dev \
-  patchelf \
-  build-essential
-```
-
-Windows 推荐通过 `winget` 安装：
+需要 Node.js（CI 使用 20）、npm、当前 stable Rust；Windows 还需要 MSVC C++ 构建工具和 WebView2 Runtime。
 
 ```powershell
-winget install OpenJS.NodeJS.LTS
-winget install Rustlang.Rustup
-winget install Microsoft.EdgeWebView2Runtime
-```
-
----
-
-## 快速上手
-
-```bash
-# 1. 安装依赖
-npm install
-
-# 2. 启动开发模式（前端 Vite + Tauri 桌面壳）
-npm run tauri dev
-
-# 3. 编译发行二进制
-npm run tauri build
-```
-
-> **提示**：仓库已经携带预生成的 `src/generated/mqtt-proto.json`，无需 proto 源即可启动开发和构建。仅当你要修改协议时才需要按 [协议生成与验证](#协议生成与验证) 节准备 `messages.proto`。
-
----
-
-## 构建与运行
-
-### 开发模式
-
-```powershell
+npm ci
+npm run check
 npm run tauri -- dev
 ```
 
-前端默认监听 `http://localhost:1420`，Tauri 自动挂载 WebView。开发模式下打开 DevTools 可观察 IPC、MQTT、视频统计等事件。
-
-### 仅前端构建
+只运行前端：
 
 ```powershell
-npm run build
+npm run dev
 ```
 
-产物输出到 `dist/`，可被 Tauri 包装为桌面应用，也可用于纯浏览器内调试（无桌面后端能力）。
+Vite 开发地址为 `http://localhost:1420`。纯浏览器模式不具备 Tauri MQTT、UDP 等桌面后端能力；状态预览可以单独查看：
 
-### 仅后端检查
-
-```powershell
-cargo check --manifest-path src-tauri/Cargo.toml
+```text
+http://localhost:1420/tools/robot-state-preview/?scenario=live
 ```
 
-CI 也会跑这一步。
-
-### 完整桌面构建
-
-```powershell
-npm run tauri build
-```
-
-会按 `src-tauri/tauri.conf.json` 的 `bundle.targets` 产出对应安装包（默认 Windows NSIS、Linux deb/AppImage）。
-
----
-
-## 资源配置
-
-`resources/` 下的资源在打包时会被嵌入应用，开发期通过 Tauri 资源协议直接读取。
-
-| 路径 | 内容 |
-| --- | --- |
-| `MessageMQTTConfig.yaml` | MQTT 主题与订阅规则 |
-| `RobotConfig.yaml` | 机器人显示元数据 |
-| `RoboSelect.yaml` | 机器人选择面板配置 |
-| `CustomByteBlockConfigs/*.{proto,xml}` | 自定义字节块（balance/drone/engineer/hero/infantry/radar/sentry） |
-| `CustomData/{ReceiveDataBlock,Template}.proto` | 自定义数据块协议 |
-| `CustomElement/` | HUD 静态/动态/固定元素 XML 描述 |
-| `HUDPanel/` | HUD 面板模板（含本次新增的 `VideoZoomStatus.xml`） |
-| `DashboardConfig/` | Dashboard 布局预设 |
-| `MapConfig/` / `Map.png` | 地图标定与底图 |
-| `VehiclePhysics/` / `physics/` | 车辆物理参数 |
-| `splash.html` | 启动画面 |
-
-修改 yaml/xml 后无需重新编译 Rust，前端热重载即可看到效果；修改 proto 需要重新生成 `src/generated/mqtt-proto.json`。
-
----
-
-## 可选能力
-
-### FFmpeg（嵌入式视频解码）
-
-默认走 libde265 软解或 WebCodecs。若要在 Tauri 二进制内嵌入 FFmpeg 静态库（启用 `internal-ffmpeg` feature），可重新生成依赖：
-
-```powershell
-# Windows
-npm run build:ffmpeg:minimal
-
-# Linux
-bash scripts/build-ffmpeg-minimal-linux.sh
-```
-
-也可以通过环境变量指向系统已有的 FFmpeg：
-
-```powershell
-$env:SHARK_FFMPEG_PATH = "C:\path\to\ffmpeg.exe"
-```
-
-构建产物默认放在 `src-tauri/vendor/ffmpeg-static/`（已在 `.gitignore` 中）。
-
-### ONNX Runtime / AI 检测
-
-AI 检测默认是 **可选外置 Python 服务**，不随客户端启动。仓库随附
-`SharkVisionLiteServer-open-source-v1.0.0-20260519.zip`，解压后可获得完整后端源码、模型与校准帧。
-
-客户端运行期默认查找 `AI Server/`，可按下面方式准备目录：
-
-```powershell
-Expand-Archive .\SharkVisionLiteServer-open-source-v1.0.0-20260519.zip -DestinationPath .
-Rename-Item .\SharkVisionLiteServer "AI Server"
-cd "AI Server"
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-后端目录结构：
-
-```
-AI Server/
-├── README.md
-├── server/
-│   ├── Server.py
-│   └── pipe_server.py
-├── requirements.txt
-├── test_images/
-└── model/
-    ├── armor.onnx
-    └── car.onnx
-```
-
-如需构建旧的嵌入式/单文件发行包，仍可下载 ONNX Runtime 动态库：
-
-```powershell
-# Windows
-npm run onnxruntime:download
-
-# Linux
-npm run onnxruntime:download:sh
-```
-
-如果 `AI Server` 不放在仓库根目录，可通过环境变量指定：
-
-```powershell
-$env:SHARK_AI_ROOT = "D:\path\to\AI Server"
-```
-
-控制通道协议：Windows 走 Named Pipe，Linux 走 Unix Domain Socket。两端只交换 JSON 控制消息，帧载荷由 Rust 端写入共享内存。
-
-### CUDA / TensorRT（可选加速）
-
-```powershell
-# Windows 装 CUDA + cuDNN + TensorRT 工具链
-scripts\install-cuda-stack.ps1
-
-# Linux 同上
-bash scripts/install-cuda-stack.sh
-
-# 量化为 TensorRT engine（需先放入 onnx + 校准帧）
-npm run quantize:int8
-```
-
-### Flatpak 打包（Linux，用于ubuntu20.04及以下版本，不推荐使用）
+Linux 开发需要相应系统依赖：
 
 ```bash
-bash scripts/build-flatpak.sh
+sudo apt-get update
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+  libjavascriptcoregtk-4.1-dev librsvg2-dev patchelf build-essential
+npm ci
+npm run tauri -- dev
 ```
 
-打包描述位于 `flatpak/`，需要本机已安装 `flatpak`、`flatpak-builder` 与 freedesktop runtime（脚本会提示具体版本号）。
+## 验证与构建
 
----
+```powershell
+npm run check
+npm run build
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml
+git diff --check
+```
 
-## 发行打包
+`check` 包含 vue-tsc、Node 回归测试和协议引用校验。Vite build 本身不执行类型检查。CI 在 Windows/Linux 执行前端与 Rust 检查。
 
-仓库提供三档 Windows 发行形态与一档 Linux 形态：
+`npm run build` 只生成 `dist/`，不是桌面安装包。默认桌面构建：
 
-| 命令 | 形态 | 体积粗略 | 包含 |
-| --- | --- | --- | --- |
-| `npm run build:lite` | Lite (GPU) | 中 | 主程序 + 必要 DLL + AI Server 入口 |
-| `npm run build:lite:cpu` | Lite (CPU) | 中 | 同上，使用 CPU ONNX Runtime |
-| `npm run build:mini` | Mini | 小 | 内嵌 FFmpeg 静态库，去掉外置依赖 |
-| `npm run build:single` | Single | 大 | 单文件发行，含全部依赖 |
-| `npm run build:linux` + `npm run package:lite:linux` | Linux tar.gz | 中 | 跨发行版可移植 |
+```powershell
+npm run tauri -- build
+```
 
-> 注意：lite/mini/single 系列脚本会要求本机已有 ONNX Runtime 动态库、TensorRT 或 FFmpeg 构建产物；脚本会在缺依赖时给出具体提示。源码仓库本身**只保证开发构建链自包含**，发行包请按脚本提示准备。
+原有 lite/mini/single、Linux、Flatpak 打包脚本仍保留。带 `internal-ffmpeg` 的构建须预先生成 FFmpeg 静态库；某些历史打包脚本还要求额外的 ONNX Runtime 等资源。本次收尾不代表所有发行形态均已重新验收。
 
-打包产物默认输出到：
+## 协议源与本地联调
 
-- `build-lite/`：Windows lite/mini 系列
-- `build-linux/`：Linux 系列
-- `build-flatpak/` 与 `.flatpak-builder/`：Flatpak 中间产物
+`UDP-MQTT Server/proto/messages.proto` 和 `src/generated/mqtt-proto.json` 均已提交，不需要私有 submodule，也不需要删除 predev/prebuild。修改 MQTT 协议后运行：
 
----
+```powershell
+npm run generate:mqtt-proto
+npm run verify:mqtt-proto
+```
 
-## 协议生成与验证
+这是 RM2026 规则的协议，不是电控自定义字节内容的最终定义。后者仍需双方约定。
 
-MQTT 消息走 protobuf 定义，前端通过编译后的 JSON Schema 完成强类型解析。
+本地测试服务的启动、Client ID 与视频配置见 [Mock Server 说明](tools/rm2026-mock-server/README.md)。Mock 的采样频率和消息覆盖只用于测试，不是官方服务器能力或实机验收结果。
 
-### 仓库默认状态
+## 视频与可选 AI
 
-- `src/generated/mqtt-proto.json` **已预生成并随仓库发布**，开箱即可启动开发与构建。
-- `npm run predev` / `npm run prebuild` hook 会调用 `generate:mqtt-proto`，**该脚本读取 `UDP-MQTT Server/proto/messages.proto`**——这是项目原始私有 submodule 的协议源，开源仓库不附带。
+- UDP 默认监听 `0.0.0.0:3334`，解析 8 字节大端分片头，支持 H.265 组帧和 MJPEG。
+- H.265 使用 Rust 解码后显示本地 MJPEG。解码队列过载会丢弃积压数据并等待关键帧；CPU/GPU 性能和发送端关键帧配置仍会影响延迟。
+- 内嵌 FFmpeg 为可选 feature；外部 FFmpeg 可通过 `SHARK_FFMPEG_PATH` 指定，缺失时有 libde265 软件解码路径。本仓库不附带生成的 FFmpeg 二进制。
+- AI 检测是可选外置 Python 服务。上游源码包 `SharkVisionLiteServer-open-source-v1.0.0-20260519.zip` 保留；按其 README 安装依赖。运行期可通过 `SHARK_AI_ROOT` 指定服务目录。
+- 测试视频由 FFmpeg testsrc2 生成，不使用赛事视频素材。
 
-### 修改协议时
+## 已知边界
 
-1. 准备一份 `messages.proto`（可来源于上游 SharkClient 主仓的 `UDP-MQTT Server/proto/messages.proto`，或自行编写）。
-2. 放到仓库根目录 `UDP-MQTT Server/proto/messages.proto`（脚本默认路径），或修改 `scripts/generate-mqtt-proto-json.mjs` 中 `protoPath` 指向你的路径。
-3. 重新生成与校验：
+- `src/api-shim.ts` 的 `parseCustomData()` 仍返回 null。原始自定义字节接收和查看可用；依赖解析字段的自定义状态、图片功能未完成。
+- 自定义数据输入会合并异步积压、保留最新待解析内容，因此不能直接当作可靠图片分片重组器。
+- 自定义控制器串口、MQTT CustomControl 和图传视频是不同接口；没有把它们合成同一种协议。
+- K 键菜单中尚未实现的操作仍是占位功能，不能据此认定可以执行机器人动作。
+- 地图标定、现场网络、视频延迟、真实电控行为须实机联调。
+- QoS 0、松键中立帧和断线队列清理不构成安全停车保证。电控仍须独立实现失联超时和安全状态。
 
-   ```powershell
-   npm run generate:mqtt-proto
-   npm run verify:mqtt-proto
-   ```
+## 上游与许可证
 
-### 不修改协议时
+参考原项目：[JNU-SHARK/SharkClient](https://github.com/JNU-SHARK/SharkClient)。本仓库保留上游历史及作者贡献，不是向上游仓库直接发布。
 
-若只想在没有 proto 源的环境下跑 `npm run dev`/`build`，可在 `package.json` 临时移除 `predev` / `prebuild` hook，或通过 `npm run dev --ignore-scripts` / `npm run build --ignore-scripts` 跳过生成；仓库自带的 `mqtt-proto.json` 仍能保证完整功能。
-
----
-
-## 已知限制与 FAQ
-
-**Q：`npm run dev` 提示找不到 `UDP-MQTT Server/proto/messages.proto`？**
-开源版默认不附带 proto 源。仓库的 `mqtt-proto.json` 已经预生成，按上一节说明跳过 hook 即可。需要修改协议时再补齐 proto 源。
-
-**Q：启动后视频画面卡顿、延迟堆积？**
-- 检查发送端是否真的是 H.265/HEVC 关键帧间隔合理（建议 GOP <= 30）。
-- 在 Settings 内将解码器切到 `Rust libde265` 软解作为对照基线。
-- 解码器每跑一轮都会丢掉积压旧帧，如果整机 CPU/GPU 真的不够，会主动降帧而不是堆队列。
-
-**Q：AI 检测启动失败？**
-- 确认已从 `SharkVisionLiteServer-open-source-v1.0.0-20260519.zip` 解压出 `AI Server/`，或正确设置 `SHARK_AI_ROOT`。
-- Windows 需要 `pywin32`（已在 `AI Server/requirements.txt` 中）。
-- 进入 Settings → AI Server 面板查看 Python 子进程 stdout，错误会原样回显。
-
-**Q：Flatpak 构建提示找不到 runtime？**
-按 `scripts/build-flatpak.sh` 提示用 `flatpak install` 安装对应版本的 freedesktop runtime 与 SDK。
-
-**Q：能否裁掉某些 HUD 组件？**
-HUD 组件由 XML + Vue 双层定义；在 `resources/CustomElement/` 与 `resources/HUDPanel/` 删除对应描述文件，并在 `src/components/` 中移除引用即可，不影响主线视频/MQTT。
-
----
-
-## 贡献指南
-
-欢迎以 PR 或 Issue 形式参与改进。建议遵循：
-
-1. **从 Issue 起步**：较大改动请先开 Issue 讨论目标与范围，避免多人重叠或方向偏离。
-2. **分支策略**：从最新 `main` 派生 `feature/<topic>` 或 `fix/<topic>` 分支。
-3. **提交规范**：单次提交聚焦一个目标，commit message 使用中文/英文均可，简述 "动机 + 改动 + 影响范围"。
-4. **构建自检**：提交前至少跑通：
-   ```powershell
-   npm run build
-   cargo check --manifest-path src-tauri/Cargo.toml
-   ```
-5. **协议改动**：涉及 `messages.proto` 时务必同步 `npm run generate:mqtt-proto` 并提交 `src/generated/mqtt-proto.json`。
-6. **平台兼容**：尽量同时关注 Windows 与 Linux 路径处理（使用 `path.join` / Rust `Path::join`，避免硬编码 `\` 或 `/`）。
-
-发现安全问题请通过 Issue 私信维护者，不要直接在公开 Issue 暴露 PoC。
-
----
-
-## 版本与变更
-
-- **v1.0.0** · 2026-05-17 · 首个公开源码发行版本。
-  - 完成对外发行清理，源码可独立构建。
-  - 随仓库提供 `SharkVisionLiteServer-open-source-v1.0.0-20260519.zip`，作为外置 AI 检测后端源码发行包。
-  - 视频管线、HUD 模板、MQTT proto 强类型链路全部就位。
-  - 提供 Windows lite/mini/single + Linux tar.gz + Flatpak 多形态打包脚本。
-
-后续变更请参考仓库 commit 历史；正式发布时会在 GitHub Releases 附 changelog。
-
----
-
-## 许可证
-
-- **GPL-3.0**
-
-`src-tauri/vendor/libde265/` 为 vendored 第三方源码，请遵循其原始许可证（libde265 默认 LGPLv3）。
-
----
-
-## 致谢
-
-- [Tauri](https://tauri.app/) · 跨平台桌面运行时
-- [Vue 3](https://vuejs.org/) · 前端框架
-- [libde265](https://github.com/strukturag/libde265) · H.265 解码库
-- [rumqttc](https://github.com/bytebeamio/rumqtt) · MQTT 客户端
-- [protobuf.js](https://github.com/protobufjs/protobuf.js) · 协议解析
-- [ONNX Runtime](https://onnxruntime.ai/) · AI 推理后端
-
-以及所有为 RoboMaster 比赛与开源社区贡献过工具与方案的开发者。
-
----
-
-如有问题、改进建议或合作意向，欢迎提交 Issue 或在社区频道联系维护者。
+许可证：GPL-3.0，见 [LICENSE](LICENSE)。vendored libde265 等第三方代码保留各自许可证。本地参考副本、`SharkClient.rar`、node_modules 和构建缓存不随本次提交上传。

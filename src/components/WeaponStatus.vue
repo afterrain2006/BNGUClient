@@ -44,8 +44,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useMqttDataStore } from '@/store/modules/mqtt_data'
-import { useDashboardStore } from '@/store'
+import { useTelemetryView } from '@/composables/useTelemetryView'
 
 const props = defineProps({
   /** 紧凑模式 */
@@ -65,25 +64,11 @@ const props = defineProps({
   }
 })
 
-const mqttStore = useMqttDataStore()
-const dashboardStore = useDashboardStore()
+const telemetry = useTelemetryView()
 
 // 获取当前选中的机器人数据
 const currentRobotData = computed(() => {
-  const robotName = dashboardStore.selectedRobot
-  if (!robotName) return null
-
-  // 判断队伍
-  const isRed = robotName.includes('红')
-  const robotMap = isRed ? mqttStore.redRobots : mqttStore.blueRobots
-
-  // 从机器人名称提取ID（如 "红1" -> 1）
-  const match = robotName.match(/\d+/)
-  if (match) {
-    const robotId = parseInt(match[0])
-    return robotMap.get(robotId)
-  }
-  return null
+  return telemetry.getRobot(telemetry.currentRobotId)
 })
 
 // 当前热量
@@ -105,7 +90,7 @@ const heatPercent = computed(() => {
 
 // 剩余弹量
 const remainingAmmo = computed(() => {
-  return currentRobotData.value?.remainingAmmo ?? dashboardStore.remainingAmmo ?? 0
+  return currentRobotData.value?.remainingAmmo ?? 0
 })
 
 // 弹量百分比

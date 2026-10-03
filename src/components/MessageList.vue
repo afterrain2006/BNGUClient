@@ -123,7 +123,8 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { useMqttDataStore } from '../store/modules/mqtt_data'
+import { useTelemetryView } from '@/composables/useTelemetryView'
+import { useRobotStore } from '@/stores/robotStore'
 
 // ==================== 类型定义 ====================
 interface BuffInfo {
@@ -148,7 +149,8 @@ interface MessageItem {
 }
 
 // ==================== Store ====================
-const mqttDataStore = useMqttDataStore()
+const telemetry = useTelemetryView()
+const robotStore = useRobotStore()
 
 // ==================== Refs ====================
 const robotMessagesRef = ref<HTMLElement | null>(null)
@@ -172,18 +174,19 @@ const maxMessages = 50
 
 // ==================== 获取当前机器人数据 ====================
 const currentRobot = computed(() => {
-  const robotId = mqttDataStore.currentRobotId
+  const robotId = telemetry.currentRobotId
   if (!robotId) return null
-  return mqttDataStore.getRobot(robotId)
+  return telemetry.getRobot(robotId)
 })
+const selectedRobotState = computed(() => robotStore.getRobot(telemetry.currentRobotId))
 
 // ==================== Buff 数据 ====================
 const activeBuffs = computed<BuffInfo[]>(() => {
-  const robotId = mqttDataStore.currentRobotId
+  const robotId = telemetry.currentRobotId
   if (!robotId) return []
 
   // 从 MQTT Store 的 activeBuffs 中获取当前机器人的 Buff
-  const storeBuffs = mqttDataStore.activeBuffs
+  const storeBuffs = telemetry.activeBuffs
   if (!storeBuffs || storeBuffs.length === 0) return []
 
   // 过滤出当前机器人的 Buff 并转换格式
@@ -202,7 +205,7 @@ const activePenalties = computed<PenaltyInfo[]>(() => {
   const penalties: PenaltyInfo[] = []
 
   // 从 store 的 activePenalties Map 获取所有活跃判罚
-  const storePenalties = mqttDataStore.activePenalties
+  const storePenalties = telemetry.activePenalties
   if (storePenalties && storePenalties.size > 0) {
     storePenalties.forEach((penalty, penaltyType) => {
       penalties.push({
@@ -214,10 +217,12 @@ const activePenalties = computed<PenaltyInfo[]>(() => {
   }
 
   // 额外检查：从当前机器人状态检查超热量（实时状态）
-  if (currentRobot.value) {
-    const robot = currentRobot.value
+  if (selectedRobotState.value) {
+    const robot = selectedRobotState.value
     // 如果机器人热量超限且没有已存在的超热量判罚
-    if (robot.maxHeat > 0 && robot.currentHeat > robot.maxHeat) {
+    const currentHeat = robot.combat.currentHeat
+    const maxHeat = robot.configuration.maxHeat
+    if (currentHeat !== undefined && maxHeat !== undefined && maxHeat > 0 && currentHeat > maxHeat) {
       const hasHeatPenalty = penalties.some((p) => p.type === 5)
       if (!hasHeatPenalty) {
         penalties.push({
@@ -233,11 +238,11 @@ const activePenalties = computed<PenaltyInfo[]>(() => {
 
 // ==================== 经验数据 ====================
 const currentExperience = computed(() => {
-  return currentRobot.value?.currentExperience || 0
+  return selectedRobotState.value?.combat.currentExperience ?? 0
 })
 
 const experienceForUpgrade = computed(() => {
-  return currentRobot.value?.experienceForUpgrade || 100
+  return selectedRobotState.value?.combat.experienceForUpgrade ?? 100
 })
 
 const expPercentage = computed(() => {
@@ -396,7 +401,7 @@ watch(
 
 // 监听判罚变化
 watch(
-  () => mqttDataStore.penaltyInfo?.penaltyType || 0,
+  () => telemetry.penaltyInfo?.penaltyType || 0,
   (newType) => {
     if (newType && newType > 0 && newType !== previousPenaltyType) {
       const config = penaltyConfig[newType]
@@ -409,7 +414,7 @@ watch(
 
 // 监听比赛阶段变化
 watch(
-  () => mqttDataStore.gameStatus.currentStage,
+  () => telemetry.gameStatus.currentStage,
   (newStage, oldStage) => {
     if (newStage !== oldStage) {
       const stageNames: Record<number, string> = {

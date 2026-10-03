@@ -8,16 +8,16 @@
  * - 无人机: 空中支援/飞镖
  */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useMqttDataStore } from '@/store/modules/mqtt_data'
+import { useTelemetryView } from '@/composables/useTelemetryView'
 
-const mqttStore = useMqttDataStore()
+const telemetry = useTelemetryView()
 
 const emit = defineEmits<{
   (e: 'action', action: string, params?: Record<string, unknown>): void
 }>()
 
 // 当前机器人 ID
-const currentRobotId = computed(() => mqttStore.currentRobotId)
+const currentRobotId = computed(() => telemetry.currentRobotId)
 
 // 机器人类型（1=英雄, 2=工程, 3/4/5=步兵, 6=无人机, 7=哨兵）
 const robotType = computed(() => {

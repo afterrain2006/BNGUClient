@@ -1,23 +1,23 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useDashboardStore } from '@/store'
-import { useMqttDataStore } from '@/store/modules/mqtt_data'
-import { CurrentStage } from '@/utils/mqtt_protocol_constants'
+import { useTelemetryView } from '@/composables/useTelemetryView'
+import { CurrentStage } from '@/composables/useTelemetryView'
 import { storeToRefs } from 'pinia'
 
 // 获取 store
 const store = useDashboardStore()
-const mqttStore = useMqttDataStore()
+const telemetry = useTelemetryView()
 const { robotStatusFlags } = storeToRefs(store)
 
 // 从 MQTT 数据获取比分
 const score = computed(() => ({
-  red: mqttStore.gameStatus.redScore,
-  blue: mqttStore.gameStatus.blueScore
+  red: telemetry.gameStatus.redScore,
+  blue: telemetry.gameStatus.blueScore
 }))
 
 // 从 MQTT 数据获取当前金币
-const remainingEconomy = computed(() => mqttStore.logisticsStatus.remainingEconomy ?? 0)
+const remainingEconomy = computed(() => telemetry.logisticsStatus.remainingEconomy ?? 0)
 
 // ==================== 比赛时间管理 ====================
 /** 本地比赛倒计时（整秒） */
@@ -68,12 +68,12 @@ const actualEnergyWidth = computed(() => {
 // ==================== 比赛状态计算属性 ====================
 /** 是否处于比赛中阶段 */
 const isInFightingStage = computed(() => {
-  return mqttStore.gameStatus.currentStage === CurrentStage.FIGHTING
+  return telemetry.gameStatus.currentStage === CurrentStage.FIGHTING
 })
 
 /** 比赛是否暂停 */
 const isMatchPaused = computed(() => {
-  return mqttStore.gameStatus.isPaused
+  return telemetry.gameStatus.isPaused
 })
 
 /** 格式化比赛时间 MM:SS */
@@ -98,7 +98,7 @@ function startLocalTimer(): void {
   lastTickTime.value = Date.now()
 
   matchTimerInterval = setInterval(() => {
-    if (localMatchTime.value > 0) {
+    if (!isMatchPaused.value && localMatchTime.value > 0) {
       const now = Date.now()
       // 每过 1000ms 减少 1 秒
       if (now - lastTickTime.value >= 1000) {
@@ -119,11 +119,11 @@ function stopLocalTimer(): void {
 
 // 监听比赛阶段变化
 watch(
-  () => mqttStore.gameStatus.currentStage,
+  () => telemetry.gameStatus.currentStage,
   (newStage) => {
     if (newStage === CurrentStage.FIGHTING) {
       // 进入比赛阶段，同步服务器时间并启动本地计时器
-      localMatchTime.value = Math.floor(mqttStore.gameStatus.stageCountdownSec)
+      localMatchTime.value = Math.floor(telemetry.gameStatus.stageCountdownSec)
       lastTickTime.value = Date.now()
       startLocalTimer()
     } else {
@@ -136,7 +136,7 @@ watch(
 
 // 监听服务器时间变化，直接同步（每次收到消息都同步）
 watch(
-  () => mqttStore.gameStatus.stageCountdownSec,
+  () => telemetry.gameStatus.stageCountdownSec,
   (newTime) => {
     if (isInFightingStage.value) {
       localMatchTime.value = Math.floor(newTime)
@@ -156,7 +156,7 @@ onMounted(() => {
 
   // 初始同步
   if (isInFightingStage.value) {
-    localMatchTime.value = Math.floor(mqttStore.gameStatus.stageCountdownSec)
+    localMatchTime.value = Math.floor(telemetry.gameStatus.stageCountdownSec)
     lastTickTime.value = Date.now()
     startLocalTimer()
   }

@@ -1,7 +1,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Buffer } from 'buffer';
-import type { ParsedMqttEventPayload } from './mqtt/mqttPayloadDecoder';
+import { encodeRm2026Command } from '@/rules/rm2026';
 
 type CommandResult = {
   success: boolean;
@@ -158,129 +158,9 @@ function dispatchChannelFrame(raw: unknown, generation: number): void {
 type MqttStatusPayload = {
   status: 'disconnected' | 'connecting' | 'connected' | 'error';
   connected: boolean;
+  clientId: string | null;
+  revision: number;
 };
-
-const MQTT_WORKER_BATCH_SIZE = 128;
-const MQTT_RAW_QUEUE_MAX_LENGTH = 4096;
-const MQTT_RESULT_FRAME_BUDGET_MS = 8;
-const MQTT_RESULT_MAX_MESSAGES_PER_FRAME = 32;
-const MQTT_RESULT_QUEUE_MAX_LENGTH = 4096;
-
-let mqttProtoRootPromise: Promise<import('protobufjs/light').Root> | null = null;
-
-function getMqttProtoRoot(): Promise<import('protobufjs/light').Root> {
-  if (!mqttProtoRootPromise) {
-    mqttProtoRootPromise = Promise.all([
-      import('protobufjs/light'),
-      import('./generated/mqtt-proto.json')
-    ]).then(([protobufModule, protoJsonModule]) => {
-      const protobufRuntime = (protobufModule as any).default ?? protobufModule;
-      return protobufRuntime.Root.fromJSON(protoJsonModule.default);
-    });
-  }
-
-  return mqttProtoRootPromise;
-}
-
-function readRecordNumber(record: Record<string, unknown>, camelKey: string, snakeKey: string): number {
-  const value = record[camelKey] ?? record[snakeKey] ?? 0;
-
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`Invalid KeyboardMouseControl payload: ${camelKey} must be a finite number`);
-  }
-
-  return Math.trunc(value);
-}
-
-function readRecordBool(record: Record<string, unknown>, camelKey: string, snakeKey: string): boolean {
-  const value = record[camelKey] ?? record[snakeKey] ?? false;
-
-  if (typeof value !== 'boolean') {
-    throw new Error(`Invalid KeyboardMouseControl payload: ${camelKey} must be a boolean`);
-  }
-
-  return value;
-}
-
-function writeVarint32(bytes: number[], value: number): void {
-  let unsignedValue = value >>> 0;
-
-  while (unsignedValue > 0x7f) {
-    bytes.push((unsignedValue & 0x7f) | 0x80);
-    unsignedValue >>>= 7;
-  }
-
-  bytes.push(unsignedValue);
-}
-
-function writeInt32Varint(bytes: number[], value: number): void {
-  if (value >= 0) {
-    writeVarint32(bytes, value);
-    return;
-  }
-
-  let unsignedValue = BigInt.asUintN(64, BigInt(value));
-
-  while (unsignedValue > 0x7fn) {
-    bytes.push(Number((unsignedValue & 0x7fn) | 0x80n));
-    unsignedValue >>= 7n;
-  }
-
-  bytes.push(Number(unsignedValue));
-}
-
-function writeBoolVarint(bytes: number[], value: boolean): void {
-  bytes.push(value ? 1 : 0);
-}
-
-function encodeKeyboardMouseControlPayload(payload: unknown): Uint8Array {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Invalid KeyboardMouseControl payload: payload must be an object');
-  }
-
-  const record = payload as Record<string, unknown>;
-  const mouseX = readRecordNumber(record, 'mouseX', 'mouse_x');
-  const mouseY = readRecordNumber(record, 'mouseY', 'mouse_y');
-  const mouseZ = readRecordNumber(record, 'mouseZ', 'mouse_z');
-  const keyboardValue = readRecordNumber(record, 'keyboardValue', 'keyboard_value');
-  const leftButtonDown = readRecordBool(record, 'leftButtonDown', 'left_button_down');
-  const rightButtonDown = readRecordBool(record, 'rightButtonDown', 'right_button_down');
-  const midButtonDown = readRecordBool(record, 'midButtonDown', 'mid_button_down');
-
-  if (
-    mouseX < -0x80000000 ||
-    mouseX > 0x7fffffff ||
-    mouseY < -0x80000000 ||
-    mouseY > 0x7fffffff ||
-    mouseZ < -0x80000000 ||
-    mouseZ > 0x7fffffff
-  ) {
-    throw new Error('Invalid KeyboardMouseControl payload: mouse fields must fit int32');
-  }
-
-  if (keyboardValue < 0 || keyboardValue > 0xffffffff) {
-    throw new Error('Invalid KeyboardMouseControl payload: keyboardValue must fit uint32');
-  }
-
-  const bytes: number[] = [];
-
-  bytes.push(0x08);
-  writeInt32Varint(bytes, mouseX);
-  bytes.push(0x10);
-  writeInt32Varint(bytes, mouseY);
-  bytes.push(0x18);
-  writeInt32Varint(bytes, mouseZ);
-  bytes.push(0x20);
-  writeBoolVarint(bytes, leftButtonDown);
-  bytes.push(0x28);
-  writeBoolVarint(bytes, rightButtonDown);
-  bytes.push(0x30);
-  writeVarint32(bytes, keyboardValue);
-  bytes.push(0x38);
-  writeBoolVarint(bytes, midButtonDown);
-
-  return new Uint8Array(bytes);
-}
 
 function normalizeMqttStatusPayload(payload: unknown): MqttStatusPayload {
   if (payload && typeof payload === 'object') {
@@ -297,13 +177,19 @@ function normalizeMqttStatusPayload(payload: unknown): MqttStatusPayload {
 
     return {
       status,
-      connected: Boolean(typedPayload.connected ?? (status === 'connected'))
+      connected: Boolean(typedPayload.connected ?? (status === 'connected')),
+      clientId: typeof typedPayload.clientId === 'string' ? typedPayload.clientId : null,
+      revision: typeof typedPayload.revision === 'number' && Number.isSafeInteger(typedPayload.revision)
+        ? typedPayload.revision
+        : 0
     };
   }
 
   return {
     status: Boolean(payload) ? 'connected' : 'disconnected',
-    connected: Boolean(payload)
+    connected: Boolean(payload),
+    clientId: null,
+    revision: 0
   };
 }
 
@@ -317,201 +203,6 @@ function normalizeLocalBrokerStatus(payload: unknown): { status: string; port: n
   }
 
   return { status: 'stopped', port: 3333 };
-}
-
-async function encodeMqttCommandPayload(messageType: string, payload: unknown): Promise<Uint8Array> {
-  if (messageType === 'KeyboardMouseControl') {
-    return encodeKeyboardMouseControlPayload(payload);
-  }
-
-  const root = await getMqttProtoRoot();
-  const MessageType = root.lookupType(messageType);
-  const errMsg = MessageType.verify(payload as Record<string, unknown>);
-
-  if (errMsg) {
-    throw new Error(`Invalid ${messageType} payload: ${errMsg}`);
-  }
-
-  const message = MessageType.fromObject(payload as Record<string, unknown>);
-  return MessageType.encode(message).finish();
-}
-
-function normalizeMqttEventBatch(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  if (payload && typeof payload === 'object') {
-    const typedPayload = payload as { messages?: unknown; items?: unknown };
-    if (Array.isArray(typedPayload.messages)) {
-      return typedPayload.messages;
-    }
-    if (Array.isArray(typedPayload.items)) {
-      return typedPayload.items;
-    }
-  }
-
-  return payload ? [payload] : [];
-}
-
-function createMqttMessageQueue(cb: (payload: ParsedMqttEventPayload) => void): {
-  enqueue(payload: unknown): void;
-  dispose(): void;
-} {
-  type WorkerResponse = {
-    id: number;
-    messages: ParsedMqttEventPayload[];
-  };
-
-  const rawQueue: unknown[] = [];
-  const resultQueue: ParsedMqttEventPayload[] = [];
-  let rawReadIndex = 0;
-  let resultReadIndex = 0;
-  let worker: Worker | null = null;
-  let workerBusy = false;
-  let nextWorkerRequestId = 0;
-  let resultPumpScheduled = false;
-  let resultPumpRunning = false;
-  let disposed = false;
-
-  const pendingRawCount = (): number => rawQueue.length - rawReadIndex;
-  const pendingResultCount = (): number => resultQueue.length - resultReadIndex;
-
-  const compactRawQueue = (): void => {
-    if (rawReadIndex === 0) return;
-    rawQueue.splice(0, rawReadIndex);
-    rawReadIndex = 0;
-  };
-
-  const compactResultQueue = (): void => {
-    if (resultReadIndex === 0) return;
-    resultQueue.splice(0, resultReadIndex);
-    resultReadIndex = 0;
-  };
-
-  const trimRawQueue = (): void => {
-    const overflow = pendingRawCount() - MQTT_RAW_QUEUE_MAX_LENGTH;
-    if (overflow <= 0) return;
-    rawReadIndex += overflow;
-    compactRawQueue();
-    console.warn(`[MQTT] Dropped ${overflow} raw messages before worker decode`);
-  };
-
-  const trimResultQueue = (): void => {
-    const overflow = pendingResultCount() - MQTT_RESULT_QUEUE_MAX_LENGTH;
-    if (overflow <= 0) return;
-    resultReadIndex += overflow;
-    compactResultQueue();
-    console.warn(`[MQTT] Dropped ${overflow} decoded messages before UI update`);
-  };
-
-  const scheduleResultPump = (): void => {
-    if (resultPumpScheduled || resultPumpRunning || disposed) return;
-    resultPumpScheduled = true;
-    window.requestAnimationFrame(() => {
-      resultPumpScheduled = false;
-      drainResults();
-    });
-  };
-
-  const ensureWorker = (): Worker => {
-    if (worker) {
-      return worker;
-    }
-
-    worker = new Worker(new URL('./mqtt/mqttDecoder.worker.ts', import.meta.url), {
-      type: 'module'
-    });
-
-    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-      workerBusy = false;
-      if (disposed) return;
-
-      resultQueue.push(...event.data.messages);
-      trimResultQueue();
-      scheduleResultPump();
-      pumpWorker();
-    };
-
-    worker.onerror = (event) => {
-      workerBusy = false;
-      console.warn('[MQTT] Decoder worker error:', event.message);
-      pumpWorker();
-    };
-
-    return worker;
-  };
-
-  const takeRawBatch = (): unknown[] => {
-    const batch: unknown[] = [];
-
-    while (pendingRawCount() > 0 && batch.length < MQTT_WORKER_BATCH_SIZE) {
-      batch.push(rawQueue[rawReadIndex++]);
-    }
-
-    if (rawReadIndex > 512 || rawReadIndex >= rawQueue.length) {
-      compactRawQueue();
-    }
-
-    return batch;
-  };
-
-  const pumpWorker = (): void => {
-    if (disposed || workerBusy || pendingRawCount() <= 0) return;
-
-    const batch = takeRawBatch();
-    if (batch.length === 0) return;
-
-    workerBusy = true;
-    ensureWorker().postMessage({
-      id: ++nextWorkerRequestId,
-      payloads: batch
-    });
-  };
-
-  const drainResults = (): void => {
-    if (resultPumpRunning || disposed) return;
-    resultPumpRunning = true;
-    const startedAt = performance.now();
-    let processed = 0;
-
-    try {
-      while (
-        pendingResultCount() > 0 &&
-        processed < MQTT_RESULT_MAX_MESSAGES_PER_FRAME &&
-        performance.now() - startedAt < MQTT_RESULT_FRAME_BUDGET_MS
-      ) {
-        const next = resultQueue[resultReadIndex++];
-        if (!next) continue;
-        cb(next);
-        processed += 1;
-      }
-    } finally {
-      if (resultReadIndex > 512 || resultReadIndex >= resultQueue.length) {
-        compactResultQueue();
-      }
-      resultPumpRunning = false;
-      if (pendingResultCount() > 0 && !disposed) {
-        scheduleResultPump();
-      }
-    }
-  };
-
-  return {
-    enqueue(payload: unknown): void {
-      if (disposed) return;
-      rawQueue.push(...normalizeMqttEventBatch(payload));
-      trimRawQueue();
-      pumpWorker();
-    },
-    dispose(): void {
-      disposed = true;
-      rawQueue.length = 0;
-      resultQueue.length = 0;
-      worker?.terminate();
-      worker = null;
-    }
-  };
 }
 
 // @ts-ignore - Ignore complex type issues temporarily for Phase 1
@@ -786,7 +477,7 @@ const api: any = {
     disconnect: async () => await invoke('mqtt_disconnect'),
     publish: async (data: any) => {
       try {
-        const payload = await encodeMqttCommandPayload(
+        const payload = await encodeRm2026Command(
           data.messageType || data.topic,
           data.payload ?? {}
         );
@@ -837,18 +528,6 @@ const api: any = {
         let unlisten: any;
         listen('mqtt-status', (event) => cb(normalizeMqttStatusPayload(event.payload))).then(u => unlisten = u);
         return () => unlisten?.();
-    },
-    onMessage: (cb: any) => { 
-        let unlistenSingle: any;
-        let unlistenBatch: any;
-        const queue = createMqttMessageQueue(cb);
-        listen('mqtt-message', (event) => queue.enqueue(event.payload)).then(u => unlistenSingle = u);
-        listen('mqtt-message-batch', (event) => queue.enqueue(event.payload)).then(u => unlistenBatch = u);
-        return () => {
-          queue.dispose();
-          unlistenSingle?.();
-          unlistenBatch?.();
-        };
     },
     onRobotStatus: () => { return () => {}; },
     onDetectionList: () => { return () => {}; },

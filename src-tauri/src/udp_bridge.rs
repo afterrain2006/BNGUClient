@@ -158,6 +158,7 @@ const FRAME_ASSEMBLY_SWEEP_INTERVAL: Duration = Duration::from_millis(20);
 
 struct PendingH265Frame {
     data: Vec<u8>,
+    enqueued_at: Instant,
     #[allow(dead_code)]
     is_keyframe: bool,
     reset_decoder: bool,
@@ -502,14 +503,19 @@ async fn udp_receive_loop(
                         break;
                     }
 
+                    stats_w.record_decode_queue_wait(pending.enqueued_at.elapsed());
+
                     if pending.reset_decoder {
                         dec = None;
                     }
                     let d = dec.get_or_insert_with(SmartDecoder::new);
+                    let decode_started = Instant::now();
                     let decode_result = d.decode_to_yuv(&pending.data);
+                    stats_w.record_decoder_call(decode_started.elapsed());
                     stats_w.set_decoder_backend(d.backend_name());
                     match decode_result {
                         Ok(Some(frame)) => {
+                            stats_w.decoded_frames.fetch_add(1, Ordering::Relaxed);
                             let now = Instant::now();
                             if now.duration_since(last_publish) < frame_interval {
                                 stats_w.dropped_old_frames.fetch_add(1, Ordering::Relaxed);
@@ -677,6 +683,8 @@ async fn udp_receive_loop(
 
                         // === Fast path: single-packet frame (no assembly needed) ===
                         if fragment_index == 0 && payload.len() as u32 == total_frame_size {
+                            stats.assembled_frames.fetch_add(1, Ordering::Relaxed);
+                            stats.record_assembly_latency(Duration::ZERO);
                             let info = detect_frame_type(payload);
                             if output_codec == "h265" && info.r#type == "h265" {
                                 let packet =
@@ -752,6 +760,8 @@ async fn udp_receive_loop(
                             frame_order.retain(|value| *value != frame_number);
 
                             if let Some(finished) = in_flight_frames.remove(&frame_number) {
+                                stats.assembled_frames.fetch_add(1, Ordering::Relaxed);
+                                stats.record_assembly_latency(finished.elapsed());
                                 let info = detect_frame_type(finished.payload());
                                 if output_codec == "h265" && info.r#type == "h265" {
                                     let packet =
@@ -1075,6 +1085,7 @@ fn send_frame_to_frontend(
 
         guard.frames.push_back(PendingH265Frame {
             data,
+            enqueued_at: Instant::now(),
             is_keyframe: info.is_keyframe,
             reset_decoder,
         });

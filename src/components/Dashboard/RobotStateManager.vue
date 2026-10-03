@@ -30,7 +30,11 @@
       <!-- 上半部分：状态条 (血量、能量、功率) -->
       <div class="bars-row">
         <div class="health-power-group">
-          <RobotHealthBar :current-health="robotHealth" :max-health="robotMaxHealth" />
+          <RobotHealthBar
+            :current-health="robotHealth"
+            :max-health="robotMaxHealth"
+            :status="healthStatus"
+          />
           <RobotPowerDisplay
             :current-power="currentPower"
             :max-power="robotMaxPower"
@@ -44,7 +48,11 @@
 
       <!-- 下半部分：模块状态 (紧凑版) -->
       <div class="modules-row">
-        <RobotModuleStatus :module-status="robotModuleStatus" :compact="true" />
+        <RobotModuleStatus
+          :module-status="robotModuleStatus"
+          :freshness="moduleFreshness"
+          :compact="true"
+        />
       </div>
     </div>
   </div>
@@ -52,7 +60,12 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { useMqttDataStore } from '../../store/modules/mqtt_data'
+import { useRobotSelectionStore } from '@/stores/robotSelectionStore'
+import { useRobotStore } from '@/stores/robotStore'
+import {
+  useFreshnessClock,
+  getDataFreshness
+} from '../../composables/useFreshnessClock'
 import RobotHealthBar from './RobotStatus/RobotHealthBar.vue'
 import RobotLevelDisplay from './RobotStatus/RobotLevelDisplay.vue'
 import RobotPowerDisplay from './RobotStatus/RobotPowerDisplay.vue'
@@ -75,72 +88,55 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 // ==================== MQTT Store ====================
-const mqttStore = useMqttDataStore()
+const robotSelection = useRobotSelectionStore()
+const robotStore = useRobotStore()
+const freshnessNow = useFreshnessClock()
 
 // ==================== 计算机器人 ID ====================
-/** 根据机器人名称获取 ID */
-const robotId = computed(() => {
-  // 优先使用 MQTT Store 中的 currentRobotId
-  if (mqttStore.currentRobotId > 0) {
-    return mqttStore.currentRobotId
-  }
-  // 如果没有设置，尝试从 props 构造
-  if (!props.robotName) return 1
+/** UI selection comes from the configured name-to-ID mapping, not the MQTT session. */
+const robotId = computed(() => robotSelection.selectedRobotId)
 
-  // 机器人类型映射
-  const typeMap: Record<string, number> = {
-    英雄: 1,
-    工程: 2,
-    步兵: 3,
-    平衡步兵: 5,
-    无人机: 6,
-    哨兵: 7,
-    雷达站: 9
-  }
+const currentRobotState = computed(() => robotStore.getRobot(robotId.value))
 
-  // 尝试从名称中提取类型
-  for (const [typeName, typeId] of Object.entries(typeMap)) {
-    if (props.robotName.includes(typeName)) {
-      return props.team === 'blue' ? typeId + 100 : typeId
-    }
-  }
-
-  return props.team === 'blue' ? 101 : 1
-})
-
-// ==================== 计算属性 - 从 MQTT Store 获取数据 ====================
-/** 当前机器人数据 */
-const currentRobot = computed(() => {
-  const team = robotId.value < 100 ? 'red' : 'blue'
-  const robotMap = team === 'red' ? mqttStore.redRobots : mqttStore.blueRobots
-  return robotMap.get(robotId.value) || null
-})
-
-/** 血量 - 来自 RobotDynamicStatus.currentHealth / RobotStaticStatus.maxHealth */
-const robotHealth = computed(() => currentRobot.value?.currentHealth ?? 0)
-const robotMaxHealth = computed(() => currentRobot.value?.maxHealth ?? 600)
+/** 当前血量来自动态或全局报告，最大血量来自静态报告。 */
+const healthStatus = computed(() =>
+  getDataFreshness(currentRobotState.value?.healthUpdatedAt ?? 0, freshnessNow.value)
+)
+const robotHealth = computed(() =>
+  currentRobotState.value?.combat.currentHealth ?? null
+)
+const robotMaxHealth = computed(() =>
+  (currentRobotState.value?.maxHealthUpdatedAt ?? 0) > 0
+    ? currentRobotState.value?.configuration.maxHealth ?? null
+    : null
+)
 
 /** 等级 - 来自 RobotStaticStatus.level */
-const robotLevel = computed(() => currentRobot.value?.level ?? 1)
+const robotLevel = computed(() =>
+  currentRobotState.value?.configuration.level ?? 1
+)
 
 /** 功率 - 来自 RobotStaticStatus.maxPower (实际功率待后续实现，暂时显示为0) */
 const currentPower = computed(() => 0) // TODO: 等待实际功率数据
-const robotMaxPower = computed(() => currentRobot.value?.maxPower ?? 120)
+const robotMaxPower = computed(() => currentRobotState.value?.configuration.maxPower ?? 120)
 
 /** 缓冲能量 - 来自 RobotDynamicStatus.currentBufferEnergy / RobotStaticStatus.maxBufferEnergy */
-const robotBufferEnergy = computed(() => currentRobot.value?.currentBufferEnergy ?? 0)
-const robotMaxBufferEnergy = computed(() => currentRobot.value?.maxBufferEnergy ?? 60)
+const robotBufferEnergy = computed(() => currentRobotState.value?.combat.currentBufferEnergy ?? 0)
+const robotMaxBufferEnergy = computed(() => currentRobotState.value?.configuration.maxBufferEnergy ?? 60)
 
 /** 底盘能量 - 来自 RobotDynamicStatus.currentChassisEnergy / RobotStaticStatus.maxChassisEnergy */
-const robotChassisEnergy = computed(() => currentRobot.value?.currentChassisEnergy ?? 0)
-const robotMaxChassisEnergy = computed(() => currentRobot.value?.maxChassisEnergy ?? 200)
+const robotChassisEnergy = computed(() => currentRobotState.value?.combat.currentChassisEnergy ?? 0)
+const robotMaxChassisEnergy = computed(() => currentRobotState.value?.configuration.maxChassisEnergy ?? 200)
 
 /** 模块状态 - 来自 RobotModuleStatus */
-const robotModuleStatus = computed(() => currentRobot.value?.moduleStatus ?? null)
+const robotModuleStatus = computed(() => currentRobotState.value?.modules ?? null)
+const moduleFreshness = computed(() =>
+  getDataFreshness(currentRobotState.value?.modulesUpdatedAt ?? 0, freshnessNow.value)
+)
 
 /** 战斗状态 - 来自 RobotDynamicStatus.isOutOfCombat 和 outOfCombatCountdown */
-const isOutOfCombat = computed(() => currentRobot.value?.isOutOfCombat ?? false)
-const outOfCombatCountdown = computed(() => currentRobot.value?.outOfCombatCountdown ?? 0)
+const isOutOfCombat = computed(() => currentRobotState.value?.combat.isOutOfCombat ?? false)
+const outOfCombatCountdown = computed(() => currentRobotState.value?.combat.outOfCombatCountdown ?? 0)
 
 /** 战斗状态文本 */
 const combatStatusText = computed(() => {
@@ -199,8 +195,8 @@ watch(
     console.log('[RobotStateManager] 机器人名称切换:', newName, '-> ID:', robotId.value)
     // 通知 MQTT Store 更新当前选中的机器人（异步加载 ID 映射）
     if (newName) {
-      await mqttStore.updateCurrentRobotType(newName)
-      console.log('[RobotStateManager] ID 更新完成, 当前 ID:', mqttStore.currentRobotId)
+      await robotSelection.selectRobot(newName)
+      console.log('[RobotStateManager] ID 更新完成, 当前 ID:', robotSelection.selectedRobotId)
     }
   },
   { immediate: true }
@@ -211,7 +207,7 @@ onMounted(async () => {
   console.log('[RobotStateManager] 组件挂载, 机器人:', props.robotName, 'ID:', robotId.value)
   // 初始化时也要通知 MQTT Store
   if (props.robotName) {
-    await mqttStore.updateCurrentRobotType(props.robotName)
+    await robotSelection.selectRobot(props.robotName)
   }
 })
 </script>

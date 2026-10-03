@@ -23,6 +23,9 @@ import CrosshairSettings, { type CrosshairConfig } from '@/components/CrosshairS
 import AmmoPurchaseMenu from '@/components/AmmoPurchaseMenu.vue'
 import RemoteAmmoPurchaseMenu from '@/components/RemoteAmmoPurchaseMenu.vue'
 import RoboControl from '@/components/RoboControl.vue'
+import { neutralOperatorInput, type OperatorInput } from '@/contracts/OperatorInput'
+import { createClientControlOutput } from '@/output/clientControlOutput'
+import { useFreshnessClock } from '@/composables/useFreshnessClock'
 import RobotActionHint from '@/components/RobotActionHint.vue'
 import VehicleAttitude from '@/components/VehicleAttitude.vue'
 import PitchIndicator from '@/components/PitchIndicator.vue'
@@ -44,7 +47,9 @@ import type { DashboardLayoutConfig } from '@/components/Dashboard/DashboardConf
 // 导入 Pinia Store
 import { useDashboardStore } from '../store'
 import { useHudTemplatesStore } from '../store/modules/hud-templates'
-import { useMqttDataStore } from '../store/modules/mqtt_data' // <--- 新增
+import { useTelemetryView } from '@/composables/useTelemetryView'
+import { useRobotSelectionStore } from '@/stores/robotSelectionStore'
+import { useConnectionStore } from '@/stores/connectionStore'
 import { panelRegistry } from '../store/panels' // 面板注册表，用于获取实时位置
 
 // 导入类型和常量
@@ -59,7 +64,9 @@ import {
 
 // ==================== Pinia Store ====================
 const store = useDashboardStore()
-const mqttDataStore = useMqttDataStore()
+const telemetry = useTelemetryView()
+const robotSelection = useRobotSelectionStore()
+const connectionStore = useConnectionStore()
 
 // 使用 storeToRefs 解构响应式状态（保持 ref 特性）
 const {
@@ -151,8 +158,7 @@ const mqttConfig = computed({
 const ipAddress = ref('192.168.12.1')
 const mqttNeedsManualReconnect = ref(false)
 let mqttAutoConnectAttempted = false
-let mqttConnectedClientId: string | null = null
-let mqttClientIdReconnectTimer: number | null = null
+const mqttActiveClientId = ref<string | null>(null)
 
 function isMqttActive(): boolean {
   return mqttStatus.value === 'connected' || mqttStatus.value === 'connecting'
@@ -165,29 +171,6 @@ function markMqttEndpointChanged(reason: string): void {
   if (isMqttActive()) {
     void disconnectMqtt()
   }
-}
-
-function clearMqttClientIdReconnectTimer(): void {
-  if (mqttClientIdReconnectTimer !== null) {
-    window.clearTimeout(mqttClientIdReconnectTimer)
-    mqttClientIdReconnectTimer = null
-  }
-}
-
-function scheduleMqttClientIdReconnect(nextClientId: string): void {
-  if (!nextClientId || mqttNeedsManualReconnect.value) return
-
-  clearMqttClientIdReconnectTimer()
-  mqttClientIdReconnectTimer = window.setTimeout(() => {
-    mqttClientIdReconnectTimer = null
-    if (mqttStatus.value !== 'connected') return
-    if (mqttConnectedClientId === nextClientId) return
-
-    console.log(
-      `[MQTT] Client ID changed, reconnecting: ${mqttConnectedClientId || 'unknown'} -> ${nextClientId}`
-    )
-    void connectMqtt({ reason: 'client-id-change' })
-  }, 300)
 }
 
 function parseBrokerUrlParts(brokerUrl: string): { scheme: string; host: string; port: number } {
@@ -278,74 +261,14 @@ const chassisYaw = ref(45) // 底盘朝向角度
 const gimbalYaw = ref(90) // 云台朝向角度
 const gimbalPitch = ref(0) // 云台俯仰角度（正值为抬头，负值为低头）
 
-const dashboardVerboseLogs =
-  import.meta.env.DEV &&
-  typeof window !== 'undefined' &&
-  window.localStorage?.getItem('shark.dashboard.verbose') === '1'
-
-function dashboardDebugLog(...args: unknown[]): void {
-  if (dashboardVerboseLogs) {
-    console.debug(...args)
-  }
-}
-
 // --- 机器人配置系统（由 RobotStateManager 组件管理，此处仅保留必要的引用）---
 import type { RobotConfigFile, RobotConfigResult } from '@/types/robot-config'
 
 const robotConfig = ref<RobotConfigFile | null>(null)
 const currentRobotConfig = ref<RobotConfigResult | null>(null)
 
-const DEFAULT_ROBOT_IDS_BY_NAME: Record<string, number> = {
-  红方1号英雄: 1,
-  蓝方1号英雄: 101,
-  红方3号步兵: 3,
-  蓝方3号步兵: 103,
-  红方4号步兵: 4,
-  蓝方4号步兵: 104,
-  红方5号步兵: 5,
-  蓝方5号步兵: 105,
-  红方2号工程: 2,
-  蓝方2号工程: 102,
-  红方6号无人机: 6,
-  蓝方6号无人机: 106,
-  红方7号哨兵: 7,
-  蓝方7号哨兵: 107,
-  红方雷达站: 9,
-  蓝方雷达站: 109
-}
-
-function normalizeVehicleId(value: unknown): number {
-  const vehicleId = Math.trunc(Number(value))
-  return Number.isFinite(vehicleId) && vehicleId > 0 ? vehicleId : 0
-}
-
-function resolveVehicleIdByRobotName(robotName: string): number {
-  const serverRobotId = normalizeVehicleId(mqttDataStore.serverSelectedRobotId)
-  if (serverRobotId > 0) return serverRobotId
-
-  const configId = normalizeVehicleId(robotConfig.value?.robotMappings?.[robotName]?.id)
-  if (configId > 0) return configId
-
-  const currentConfigId = normalizeVehicleId(currentRobotConfig.value?.id)
-  if (currentConfigId > 0 && robotName === selectedRobot.value) return currentConfigId
-
-  const storeRobotId = normalizeVehicleId(mqttDataStore.currentRobotId)
-  if (storeRobotId > 0 && mqttDataStore.currentRobotType === robotName) return storeRobotId
-
-  return DEFAULT_ROBOT_IDS_BY_NAME[robotName] ?? 0
-}
-
-const selectedVehicleId = computed(() => resolveVehicleIdByRobotName(selectedRobot.value))
-const effectiveMqttClientId = computed(() => {
-  return selectedVehicleId.value > 0 ? String(selectedVehicleId.value) : ''
-})
-
 function getMqttClientIdForConnection(): string | undefined {
-  const clientId = effectiveMqttClientId.value
-  if (clientId) return clientId
-
-  const trimmedFallback = String(mqttConfig.value.clientId ?? '').trim()
-  return trimmedFallback || undefined
+  return mqttConfig.value.clientId.trim() || undefined
 }
 // --- 结束 ---
 
@@ -366,25 +289,25 @@ const crosshairConfig = ref<CrosshairConfig>({
 })
 
 // ==================== 低血量屏幕效果 ====================
+const HEALTH_STALE_MS = 3000
+const healthFreshnessNow = useFreshnessClock()
+
 /**
  * 计算当前机器人的血量百分比
  * 根据选择的队伍和机器人类型从 MQTT 数据中获取血量
  */
-const currentRobotHealthPercentage = computed(() => {
-  const team = selectedTeam || 'red'
-  const robotList = team === 'red' ? mqttDataStore.redRobotList : mqttDataStore.blueRobotList
-
-  // 如果没有机器人数据，返回满血（避免误触发低血量效果）
-  if (robotList.length === 0) {
-    return 100
-  }
-
-  // 简单实现：使用第一个机器人的血量
-  // TODO: 根据 selectedRobot 匹配具体机器人类型
-  const robot = robotList[0]
-  if (!robot || robot.maxHealth <= 0) {
-    return 100
-  }
+const currentRobotHealthPercentage = computed<number | null>(() => {
+  const selectedId = telemetry.currentRobotId
+  const robot = telemetry.getRobot(selectedId)
+  if (
+    !robot ||
+    robot.healthUpdatedAt <= 0 ||
+    robot.maxHealthUpdatedAt <= 0 ||
+    robot.currentHealth === undefined ||
+    robot.maxHealth === undefined ||
+    healthFreshnessNow.value - robot.healthUpdatedAt > HEALTH_STALE_MS ||
+    robot.maxHealth <= 0
+  ) return null
 
   return (robot.currentHealth / robot.maxHealth) * 100
 })
@@ -397,6 +320,8 @@ const currentRobotHealthPercentage = computed(() => {
  */
 const lowHealthVignetteOpacity = computed(() => {
   const healthPercent = currentRobotHealthPercentage.value
+
+  if (healthPercent === null) return 0
 
   if (healthPercent >= 50) {
     return 0
@@ -412,7 +337,9 @@ const lowHealthVignetteOpacity = computed(() => {
 /**
  * 低血量脉搏动画触发条件（血量 < 25%）
  */
-const isLowHealthCritical = computed(() => currentRobotHealthPercentage.value < 25)
+const isLowHealthCritical = computed(
+  () => currentRobotHealthPercentage.value !== null && currentRobotHealthPercentage.value < 25
+)
 
 /**
  * 是否有任何菜单打开（用于禁用鼠标捕获）
@@ -612,243 +539,12 @@ const videoZoomText = computed(() => `${videoZoom.value.toFixed(1)}x`)
 const globalHotkeys = ref<GlobalHotkeys>(loadSavedGlobalHotkeys())
 const recordingHotkeyAction = ref<GlobalHotkeyAction | null>(null)
 
-interface KeyboardMouseControlFrame {
-  mouseX: number
-  mouseY: number
-  mouseZ: number
-  leftButtonDown: boolean
-  rightButtonDown: boolean
-  midButtonDown: boolean
-  keyboardValue: number
-}
-
-const ZERO_KEYBOARD_MOUSE_CONTROL_FRAME: KeyboardMouseControlFrame = {
-  mouseX: 0,
-  mouseY: 0,
-  mouseZ: 0,
-  leftButtonDown: false,
-  rightButtonDown: false,
-  midButtonDown: false,
-  keyboardValue: 0
-}
-
-const ROBO_CONTROL_TOPIC = 'KeyboardMouseControl'
-const ROBO_CONTROL_LEGACY_TOPIC = 'robot/client/keyboard_mouse'
-const ROBO_CONTROL_MESSAGE_TYPE = 'KeyboardMouseControl'
-const ROBO_CONTROL_QOS = 0
-const ROBO_CONTROL_MAX_IN_FLIGHT = 1
-const ROBO_CONTROL_DEBUG_STORAGE_KEY = 'shark.dashboard.roboControlDebug'
-const ROBO_CONTROL_ECHO_TOPICS = new Set([ROBO_CONTROL_TOPIC, ROBO_CONTROL_LEGACY_TOPIC])
-const MQTT_UI_FRAME_BUDGET_MS = 6
-const MQTT_UI_MAX_MESSAGES_PER_FRAME = 48
-const MQTT_UI_IMPORTANT_QUEUE_MAX = 256
-const MQTT_COALESCED_MESSAGE_TYPES = new Set([
-  'game_status',
-  'global_unit_status',
-  'global_logistics_status',
-  'global_special_mechanism',
-  'robot_static_status',
-  'robot_dynamic_status',
-  'robot_position',
-  'custom_byte_block',
-  'robot_module_status',
-  'robot_injury_stat',
-  'robot_respawn_status',
-  'buff',
-  'penalty_info',
-  'rader_info_to_client',
-  'sentinel_status_sync',
-  'rune_status_sync',
-  'air_support_status_sync'
-])
-
-type RoboControlPublishOptions = {
-  force?: boolean
-}
-
-type DashboardMqttMessage = {
-  topic: string
-  messageType: string
-  data: object | string
-  raw: string
-  timestamp: number
-  parseSuccess?: boolean
-}
-
-let roboControlPublishInFlight = 0
-let queuedRoboControlFrame: KeyboardMouseControlFrame | null = null
-let lastRoboControlPublishWarningAt = 0
-let lastRoboControlPublishErrorAt = 0
-let lastRoboControlDebugAt = 0
-let roboControlDebugFrames = 0
-let roboControlDebugSent = 0
-let roboControlDebugDropped = 0
-let pendingImportantMqttMessages: DashboardMqttMessage[] = []
-let pendingLatestMqttMessages = new Map<string, DashboardMqttMessage>()
-let mqttUiPumpFrame: number | null = null
-let mqttUiStatsPending = 0
-let mqttUiLastMessageTime = 0
-
-function mergeKeyboardMouseControlFrames(
-  previous: KeyboardMouseControlFrame,
-  next: KeyboardMouseControlFrame
-): KeyboardMouseControlFrame {
-  return {
-    mouseX: previous.mouseX + next.mouseX,
-    mouseY: previous.mouseY + next.mouseY,
-    mouseZ: previous.mouseZ + next.mouseZ,
-    leftButtonDown: next.leftButtonDown,
-    rightButtonDown: next.rightButtonDown,
-    midButtonDown: next.midButtonDown,
-    keyboardValue: next.keyboardValue
-  }
-}
-
-function isZeroKeyboardMouseControlFrame(frame: KeyboardMouseControlFrame): boolean {
-  return (
-    frame.mouseX === 0 &&
-    frame.mouseY === 0 &&
-    frame.mouseZ === 0 &&
-    frame.leftButtonDown === false &&
-    frame.rightButtonDown === false &&
-    frame.midButtonDown === false &&
-    frame.keyboardValue === 0
-  )
-}
-
-function isRoboControlEchoMessage(topic: string, messageType: string): boolean {
-  return messageType === 'remote_control' && ROBO_CONTROL_ECHO_TOPICS.has(topic)
-}
-
-function isMqttMessageCoalescable(messageType: string): boolean {
-  return MQTT_COALESCED_MESSAGE_TYPES.has(messageType)
-}
-
-function flushMqttUiStats(): void {
-  if (mqttUiStatsPending <= 0) return
-
-  mqttStats.value.messagesReceived += mqttUiStatsPending
-  mqttStats.value.lastMessageTime = mqttUiLastMessageTime || Date.now()
-  mqttUiStatsPending = 0
-}
-
-function handleDashboardMqttMessage(data: DashboardMqttMessage): void {
-  dashboardDebugLog('[MQTT] 收到消息:', data.topic, data.data)
-  mqttUiStatsPending += 1
-  mqttUiLastMessageTime = Date.now()
-  mqttDataStore.handleMessage(data.topic, data.messageType as any, data.data)
-}
-
-function scheduleDashboardMqttPump(): void {
-  if (mqttUiPumpFrame !== null) return
-
-  mqttUiPumpFrame = window.requestAnimationFrame(() => {
-    mqttUiPumpFrame = null
-    drainDashboardMqttMessages()
-  })
-}
-
-function drainDashboardMqttMessages(): void {
-  const startedAt = performance.now()
-  let processed = 0
-
-  while (
-    pendingImportantMqttMessages.length > 0 &&
-    processed < MQTT_UI_MAX_MESSAGES_PER_FRAME &&
-    performance.now() - startedAt < MQTT_UI_FRAME_BUDGET_MS
-  ) {
-    const next = pendingImportantMqttMessages.shift()
-    if (!next) continue
-    handleDashboardMqttMessage(next)
-    processed += 1
-  }
-
-  for (const [key, next] of pendingLatestMqttMessages) {
-    if (
-      processed >= MQTT_UI_MAX_MESSAGES_PER_FRAME ||
-      performance.now() - startedAt >= MQTT_UI_FRAME_BUDGET_MS
-    ) {
-      break
-    }
-
-    pendingLatestMqttMessages.delete(key)
-    handleDashboardMqttMessage(next)
-    processed += 1
-  }
-
-  flushMqttUiStats()
-
-  if (pendingImportantMqttMessages.length > 0 || pendingLatestMqttMessages.size > 0) {
-    scheduleDashboardMqttPump()
-  }
-}
-
-function enqueueDashboardMqttMessage(data: DashboardMqttMessage): void {
-  if (isRoboControlEchoMessage(data.topic, data.messageType)) {
-    return
-  }
-
-  if (data.parseSuccess === false) {
-    dashboardDebugLog('[MQTT] Dropped undecodable message:', data.topic)
-    return
-  }
-
-  if (isMqttMessageCoalescable(data.messageType)) {
-    pendingLatestMqttMessages.set(`${data.messageType}:${data.topic}`, data)
-  } else {
-    pendingImportantMqttMessages.push(data)
-    if (pendingImportantMqttMessages.length > MQTT_UI_IMPORTANT_QUEUE_MAX) {
-      pendingImportantMqttMessages.splice(
-        0,
-        pendingImportantMqttMessages.length - MQTT_UI_IMPORTANT_QUEUE_MAX
-      )
-    }
-  }
-
-  scheduleDashboardMqttPump()
-}
-
-function cleanupDashboardMqttQueue(): void {
-  if (mqttUiPumpFrame !== null) {
-    window.cancelAnimationFrame(mqttUiPumpFrame)
-    mqttUiPumpFrame = null
-  }
-
-  pendingImportantMqttMessages = []
-  pendingLatestMqttMessages = new Map()
-  mqttUiStatsPending = 0
-  mqttUiLastMessageTime = 0
-}
-
-function isRoboControlDebugEnabled(): boolean {
-  return localStorage.getItem(ROBO_CONTROL_DEBUG_STORAGE_KEY) === '1'
-}
-
-function recordRoboControlDebug(frame: KeyboardMouseControlFrame, sent = false, dropped = false): void {
-  if (!isRoboControlDebugEnabled()) return
-
-  roboControlDebugFrames += 1
-  if (sent) roboControlDebugSent += 1
-  if (dropped) roboControlDebugDropped += 1
-
-  const now = Date.now()
-  if (now - lastRoboControlDebugAt < 1000) return
-
-  lastRoboControlDebugAt = now
-  console.debug('[RoboControl] publish stats', {
-    frames: roboControlDebugFrames,
-    sent: roboControlDebugSent,
-    dropped: roboControlDebugDropped,
-    inFlight: roboControlPublishInFlight,
-    queued: Boolean(queuedRoboControlFrame),
-    mqttStatus: mqttStatus.value,
-    lastFrame: frame,
-    isZero: isZeroKeyboardMouseControlFrame(frame)
-  })
-  roboControlDebugFrames = 0
-  roboControlDebugSent = 0
-  roboControlDebugDropped = 0
-}
+const controlOutput = createClientControlOutput()
+const stopControlConnectionWatch = watch(
+  () => [connectionStore.connected, connectionStore.activeClientId] as const,
+  ([connected, clientId]) => controlOutput.sender.setConnection(connected ? clientId : null),
+  { immediate: true, flush: 'sync' }
+)
 
 // 监听 Pipe 服务器状态变化
 if (window.api?.pipeServer?.onStatusChanged) {
@@ -982,7 +678,7 @@ async function drainLatestUdpRenderFrame(): Promise<void> {
  */
 function handleRobotChange(robotName: string): void {
   selectedRobot.value = robotName
-  void mqttDataStore.updateCurrentRobotType(robotName)
+  void robotSelection.selectRobot(robotName)
   console.log('[Dashboard] 机器人选择已更新:', robotName)
 }
 
@@ -1936,9 +1632,9 @@ async function connectMqtt(options: { auto?: boolean; reason?: string } = {}): P
       : mqttConfig.value.brokerUrl
 
     const clientId = getMqttClientIdForConnection()
-    if (!clientId) {
+    if (!clientId || !/^\d+$/.test(clientId)) {
       mqttStatus.value = 'error'
-      console.error('[MQTT] 未选择车辆，无法设置 Client ID')
+      console.error('[MQTT] 请在连接设置中填写数字机器人 ID 作为 Client ID')
       return
     }
 
@@ -1962,25 +1658,21 @@ async function connectMqtt(options: { auto?: boolean; reason?: string } = {}): P
     const success = typeof result === 'boolean' ? result : Boolean(result?.success ?? result)
     if (!success) {
       mqttStatus.value = 'error'
-      mqttConnectedClientId = null
+      mqttActiveClientId.value = null
       console.error('[MQTT] 连接失败')
       return
     }
 
     const status = await window.api.mqtt.getStatus()
     mqttStatus.value = status.status as 'disconnected' | 'connecting' | 'connected' | 'error'
-    mqttDataStore.setConnectionStatus(status.connected)
+    mqttActiveClientId.value = status.connected ? status.clientId ?? null : null
     if (status.connected) {
-      mqttConnectedClientId = clientId
       mqttNeedsManualReconnect.value = false
-    } else {
-      mqttConnectedClientId = null
     }
     console.log('[MQTT] 连接请求已确认:', status.status)
   } catch (error) {
     mqttStatus.value = 'error'
-    mqttConnectedClientId = null
-    mqttDataStore.setConnectionStatus(false)
+    mqttActiveClientId.value = null
     console.error('[MQTT] 连接错误:', error)
   }
 }
@@ -1994,11 +1686,9 @@ async function disconnectMqtt(): Promise<void> {
   }
 
   try {
-    clearMqttClientIdReconnectTimer()
     await window.api.mqtt.disconnect()
     mqttStatus.value = 'disconnected'
-    mqttConnectedClientId = null
-    mqttDataStore.setConnectionStatus(false)
+    mqttActiveClientId.value = null
     console.log('[MQTT] 已断开连接')
   } catch (error) {
     console.error('[MQTT] 断开失败:', error)
@@ -2641,84 +2331,14 @@ watch(
   { deep: true, immediate: true }
 )
 
-/**
- * 发布机器人键鼠控制帧
- */
-async function publishKeyboardMouseControl(
-  frame: KeyboardMouseControlFrame,
-  options: RoboControlPublishOptions = {}
-): Promise<void> {
-  if (!window.api?.mqtt?.publish) return
-
-  if (mqttStatus.value !== 'connected') {
-    const now = Date.now()
-    if (isMouseCaptured.value && now - lastRoboControlPublishWarningAt > 3000) {
-      lastRoboControlPublishWarningAt = now
-      console.warn('[RoboControl] MQTT 未连接，键鼠控制帧未发送')
-    }
-    return
-  }
-
-  if (roboControlPublishInFlight >= ROBO_CONTROL_MAX_IN_FLIGHT) {
-    queuedRoboControlFrame = options.force
-      ? frame
-      : queuedRoboControlFrame
-        ? mergeKeyboardMouseControlFrames(queuedRoboControlFrame, frame)
-        : frame
-    recordRoboControlDebug(frame, false, true)
-    return
-  }
-
-  roboControlPublishInFlight += 1
-  try {
-    const result = await window.api.mqtt.publish({
-      topic: ROBO_CONTROL_TOPIC,
-      messageType: ROBO_CONTROL_MESSAGE_TYPE,
-      payload: frame,
-      qos: ROBO_CONTROL_QOS
-    })
-
-    if (result?.success === false) {
-      const now = Date.now()
-      if (now - lastRoboControlPublishErrorAt > 1000) {
-        lastRoboControlPublishErrorAt = now
-        console.warn('[RoboControl] 键鼠控制帧发送失败:', result.error || 'unknown error')
-      }
-    } else {
-      recordRoboControlDebug(frame, true)
-    }
-  } catch (error) {
-    const now = Date.now()
-    if (now - lastRoboControlPublishErrorAt > 1000) {
-      lastRoboControlPublishErrorAt = now
-      console.warn('[RoboControl] 键鼠控制帧发送异常:', error)
-    }
-  } finally {
-    roboControlPublishInFlight = Math.max(0, roboControlPublishInFlight - 1)
-    if (roboControlPublishInFlight < ROBO_CONTROL_MAX_IN_FLIGHT && queuedRoboControlFrame) {
-      const nextFrame = queuedRoboControlFrame
-      queuedRoboControlFrame = null
-      void publishKeyboardMouseControl(nextFrame)
-    }
-  }
+/** 采集层只提交通用输入；规则层负责协议映射。 */
+function handleRoboControlFrame(frame: OperatorInput): void {
+  controlOutput.sender.send(frame)
 }
 
-/**
- * 处理机器人操控组件控制帧
- */
-function handleRoboControlFrame(frame: KeyboardMouseControlFrame): void {
-  void publishKeyboardMouseControl(frame)
-}
-
-/**
- * 处理鼠标捕获状态变化
- */
 function handleCaptureChange(captured: boolean): void {
   isMouseCaptured.value = captured
-  if (!captured) {
-    queuedRoboControlFrame = null
-    void publishKeyboardMouseControl(ZERO_KEYBOARD_MOUSE_CONTROL_FRAME, { force: true })
-  }
+  if (!captured) controlOutput.sender.send(neutralOperatorInput(), { force: true })
   console.log('[Dashboard] 鼠标捕获状态:', captured ? '已捕获' : '已释放')
 }
 
@@ -2899,7 +2519,7 @@ const robotOptions = computed<Array<{ value: string; label: string }>>(() => {
 // ==================== 生命周期钩子 ====================
 // UDP 错误监听清理函数
 watch(
-  () => mqttDataStore.currentRobotType,
+  () => telemetry.currentRobotType,
   (robotName) => {
     if (robotName && selectedRobot.value !== robotName) {
       selectedRobot.value = robotName
@@ -2908,20 +2528,8 @@ watch(
   }
 )
 
-watch(
-  effectiveMqttClientId,
-  (clientId, previousClientId) => {
-    if (!clientId || !previousClientId || clientId === previousClientId) return
-    if (mqttStatus.value !== 'connected') return
-    if (mqttConnectedClientId === clientId) return
-
-    scheduleMqttClientIdReconnect(clientId)
-  }
-)
-
 let udpErrorCleanup: (() => void) | null = null
 let mqttStatusCleanup: (() => void) | null = null
-let mqttMessageCleanup: (() => void) | null = null
 let mqttBrokerStatusCleanup: (() => void) | null = null
 
 onMounted(async () => {
@@ -2971,33 +2579,12 @@ onMounted(async () => {
 
   // 监听 MQTT 状态变化
   if (window.api?.mqtt?.onStatus) {
-    mqttStatusCleanup = window.api.mqtt.onStatus((data: { status: string; connected: boolean }) => {
+    mqttStatusCleanup = window.api.mqtt.onStatus((data: { status: string; connected: boolean; clientId?: string | null }) => {
       console.log('[MQTT] 状态变化:', data.status)
       mqttStatus.value = data.status as 'disconnected' | 'connecting' | 'connected' | 'error'
-      if (!data.connected) {
-        mqttConnectedClientId = null
-      } else if (!mqttConnectedClientId) {
-        mqttConnectedClientId = getMqttClientIdForConnection() ?? null
-      }
+      mqttActiveClientId.value = data.connected ? data.clientId ?? null : null
       // 同步到 MQTT Data Store
-      mqttDataStore.setConnectionStatus(data.connected)
     })
-  }
-
-  // 监听 MQTT 消息
-  if (window.api?.mqtt?.onMessage) {
-    mqttMessageCleanup = window.api.mqtt.onMessage(
-      (data: {
-        topic: string
-        messageType: string
-        data: object | string
-        raw: string
-        timestamp: number
-        parseSuccess?: boolean
-      }) => {
-        enqueueDashboardMqttMessage(data)
-      }
-    )
   }
 
   // 获取 MQTT 初始状态
@@ -3005,8 +2592,7 @@ onMounted(async () => {
     try {
       const status = await window.api.mqtt.getStatus()
       mqttStatus.value = status.status as 'disconnected' | 'connecting' | 'connected' | 'error'
-      mqttDataStore.setConnectionStatus(status.connected)
-      mqttConnectedClientId = status.connected ? getMqttClientIdForConnection() ?? null : null
+      mqttActiveClientId.value = status.connected ? status.clientId ?? null : null
     } catch (error) {
       console.warn('[Dashboard] 获取 MQTT 状态失败:', error)
     }
@@ -3073,6 +2659,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  stopControlConnectionWatch()
+  controlOutput.sender.dispose()
   console.log('[Dashboard] 组件卸载中...')
 
   // 清理 UDP 错误监听
@@ -3086,12 +2674,6 @@ onUnmounted(() => {
     mqttStatusCleanup()
     mqttStatusCleanup = null
   }
-  if (mqttMessageCleanup) {
-    mqttMessageCleanup()
-    mqttMessageCleanup = null
-  }
-  cleanupDashboardMqttQueue()
-  clearMqttClientIdReconnectTimer()
   if (mqttBrokerStatusCleanup) {
     mqttBrokerStatusCleanup()
     mqttBrokerStatusCleanup = null
@@ -4201,14 +3783,18 @@ const handlePlaceGraphicTemplate = (payload: {
                     <label for="mqtt-clientid">Client ID</label>
                     <input
                       id="mqtt-clientid"
-                      :value="effectiveMqttClientId || '自动生成'"
+                      v-model.trim="mqttConfig.clientId"
                       type="text"
-                      readonly
+                      inputmode="numeric"
+                      placeholder="例如 3 或 103"
                     />
                     <span class="input-hint">
-                      根据当前车辆 ID 自动设置，当前车辆 ID:
-                      {{ selectedVehicleId > 0 ? selectedVehicleId : '未选择' }}
+                      按 RM2026 协议填写本机机器人 ID；当前连接：{{ mqttActiveClientId ?? '未连接' }}
                     </span>
+                    <span
+                      v-if="mqttStatus === 'connected' && mqttConfig.clientId.trim() !== mqttActiveClientId"
+                      class="input-hint warning"
+                    >Client ID 修改将在断开并重新连接后生效</span>
                   </div>
                   <div class="form-item">
                     <label for="mqtt-username">用户名 (可选)</label>
@@ -4253,12 +3839,12 @@ const handlePlaceGraphicTemplate = (payload: {
                       </div>
                       <div class="stat-item">
                         <span class="stat-label">已接收:</span>
-                        <span class="stat-value">{{ mqttStats.messagesReceived }} 条</span>
+                        <span class="stat-value">{{ connectionStore.messagesReceived }} 条</span>
                       </div>
-                      <div class="stat-item" v-if="mqttStats.lastMessageTime > 0">
+                      <div class="stat-item" v-if="connectionStore.lastMessageTime > 0">
                         <span class="stat-label">最后消息:</span>
                         <span class="stat-value">{{
-                          new Date(mqttStats.lastMessageTime).toLocaleTimeString()
+                          new Date(connectionStore.lastMessageTime).toLocaleTimeString()
                         }}</span>
                       </div>
                     </div>
@@ -4871,7 +4457,8 @@ const handlePlaceGraphicTemplate = (payload: {
 
     <!-- 机器人操控组件 -->
     <RoboControl
-      :enabled="!isAnyMenuOpen"
+      :input-policy="controlOutput.rule.inputPolicy"
+      :enabled="!isAnyMenuOpen && connectionStore.connected"
       :hud-edit-mode="isHudInteractive"
       @control-frame="handleRoboControlFrame"
       @capture-change="handleCaptureChange"
