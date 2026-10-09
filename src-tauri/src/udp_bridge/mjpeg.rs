@@ -119,7 +119,7 @@ impl MjpegStreamServer {
                 while alive_accept.load(Ordering::Relaxed) {
                     match listener.accept() {
                         Ok((mut stream, _peer)) => {
-                            let reserved = active_clients_accept.fetch_update(
+                            let reserved = active_clients_accept.try_update(
                                 Ordering::AcqRel,
                                 Ordering::Acquire,
                                 |count| (count < MAX_MJPEG_CLIENTS).then_some(count + 1),
