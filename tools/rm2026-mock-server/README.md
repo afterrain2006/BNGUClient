@@ -31,7 +31,7 @@ npm run generate-video
 ## 连接 SharkClient
 
 1. 启动 Mock Server。
-2. 在客户端 Dashboard 设置中把 Broker 地址改为 `mqtt://127.0.0.1:3333`，端口设为 `3333`，Client ID 设为 `3`，点击连接。
+2. 图传页按 P 打开 Dashboard 设置，在“机器人连接”把 IP 地址设为 `127.0.0.1`（不要填 mqtt:// 前缀），MQTT 端口设为 `3333`，Client ID 设为 `3`，点击连接。
 3. UDP 地址保持 `0.0.0.0:3334`，视频编码可选择“自动检测”或“H.265”，点击连接。
 4. 手动选择红方 3 号步兵查看数据。连接的 Client ID 决定本机身份；`RobotStaticStatus` 只校验身份、更新静态信息，不改变 UI 选择。
 
@@ -82,6 +82,7 @@ npm run typecheck
 ## 已知限制
 
 - 仅实现第一批 6 种下行消息，不模拟全部 RM2026 协议。
+- 不发送 RobotModuleStatus；模块灯等待/灰色是预期行为。完整灯态可用 [状态预览](../robot-state-preview/README.md) 验证。
 - 视频是循环的 10 秒测试码流。
 - 网络异常模拟是轻量实现，不是精确的网络仿真器。
 - Mock 只绑定 loopback，不提供认证，不应暴露到比赛或公共网络。

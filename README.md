@@ -4,6 +4,14 @@
 
 本仓库是本次开发的收尾版本：遥测已切换到新数据链，键鼠采集与 RM2026 编码已分离，原有 HUD 和视频功能保留。它不是已完成官方赛事服务器和实机验收的承诺。上游作者信息和 GPL-3.0 许可证保留；部分二进制名、包名和资源中的 SharkClient 标识暂未改名，以免破坏既有构建和配置兼容性。
 
+## 从哪里开始
+
+- 第一次运行：[安装与使用指南](docs/installation-and-usage.md)，包含 Windows/Linux 环境、克隆、桌面启动、Mock 联调、连接设置和操作按键。
+- 修改代码或遇到问题：[调试与排错指南](docs/debugging.md)，包含开发者工具、日志、断点、MQTT/视频分层定位、测试命令和 GitHub CI。
+- 看设计边界：[架构文档](docs/telemetry-architecture.md)；准备现场联调：[交付清单](docs/development-handoff.md)。
+
+目前没有已发布的安装包，请按指南从源码启动。只运行 `npm run dev` 会启动网页开发服务器，**真正的桌面客户端需运行 `npm run tauri -- dev`**。
+
 ## 当前架构
 
 ```mermaid
@@ -60,7 +68,7 @@ flowchart LR
 
 ## 开发运行
 
-需要 Node.js（CI 使用 20）、npm、当前 stable Rust；Windows 还需要 MSVC C++ 构建工具和 WebView2 Runtime。
+本地已验证 Node.js 22、npm 和 Rust 1.98 stable；CI 当前使用 Node.js 20 与 stable Rust。Windows 还需要 MSVC C++ 构建工具和 WebView2 Runtime；具体安装步骤见 [安装指南](docs/installation-and-usage.md)。
 
 ```powershell
 npm ci
@@ -146,3 +154,9 @@ npm run verify:mqtt-proto
 参考原项目：[JNU-SHARK/SharkClient](https://github.com/JNU-SHARK/SharkClient)。本仓库保留上游历史及作者贡献，不是向上游仓库直接发布。
 
 许可证：GPL-3.0，见 [LICENSE](LICENSE)。vendored libde265 等第三方代码保留各自许可证。本地参考副本、`SharkClient.rar`、node_modules 和构建缓存不随本次提交上传。
+
+## GitHub 文件列表右边的文字是什么
+
+那一列是最后一次影响该文件（目录则包括其内部文件）的 **Git 提交说明**，不是文件内容、文件用途或重复生成的数据。多个文件在同一个提交中修改，就会显示相同说明；点击说明可查看对应提交和差异。
+
+每个目录的职责请看上面的“仓库结构”，详细操作看文档。后续按实际任务分别提交，例如文档更新、CI 修复；不为了改变这一列的显示而修改无关文件或重写旧历史。
