@@ -11,7 +11,7 @@ if (ifMissing && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) 
 }
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true })
-const ffmpeg = process.env.SHARK_FFMPEG_PATH || 'ffmpeg'
+const ffmpeg = process.env.BNGUCLIENT_FFMPEG_PATH || 'ffmpeg'
 const args = [
   '-hide_banner', '-loglevel', 'warning', '-y',
   '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30',

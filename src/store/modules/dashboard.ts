@@ -11,19 +11,13 @@ import type {
   VideoSource,
   TabType,
   TeamType,
-  PipeServerStatus,
-  PerformancePreset,
   UdpConfig,
   UdpStats,
   MqttConfig,
   MqttMessage,
   MqttStats,
-  DetectionConfig,
-  EncodeConfig,
-  DetectionStats,
   GlobalConfig,
   GlobalState,
-  Detection,
   MatchStatus,
   Score,
   RobotStatusFlags
@@ -33,9 +27,6 @@ import type {
 import {
   DEFAULT_UDP_CONFIG,
   DEFAULT_MQTT_CONFIG,
-  DEFAULT_DETECTION_CONFIG,
-  DEFAULT_ENCODE_CONFIG,
-  DEFAULT_DETECTION_STATS,
   DEFAULT_UDP_STATS,
   DEFAULT_MQTT_STATS,
   DEFAULT_VIDEO_STATUS,
@@ -47,7 +38,6 @@ import {
   DEFAULT_CAPACITOR_ENERGY,
   DEFAULT_EXCHANGEABLE_AMMO,
   MAX_MQTT_MESSAGES,
-  PERFORMANCE_PRESETS,
   DEFAULT_MATCH_DURATION,
   DEFAULT_SCORE,
   DEFAULT_ROBOT_STATUS_FLAGS
@@ -60,13 +50,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
    * globalConfig: 统一管理所有配置参数
    */
   const globalConfig = ref<GlobalConfig>({
-    encode: { ...DEFAULT_ENCODE_CONFIG },
-    detection: { ...DEFAULT_DETECTION_CONFIG },
     udp: { ...DEFAULT_UDP_CONFIG },
-    mqtt: { ...DEFAULT_MQTT_CONFIG },
-    performancePreset: 'performance',
-    encodingMethod: 'cpu',
-    gpuSupported: false
+    mqtt: { ...DEFAULT_MQTT_CONFIG }
   })
 
   /**
@@ -75,8 +60,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const globalState = ref<GlobalState>({
     videoSource: 'udp',
     videoConnected: false,
-    detectionEnabled: false,
-    pipeServerStatus: 'stopped',
     udpStreamStatus: 'disconnected',
     mqttStatus: 'disconnected'
   })
@@ -90,7 +73,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const isHudInteractive = ref(false)
   const isDrawingMode = ref(false)
   // 调试模式：启用后设置面板会显示 MQTT 指令发送等内部调试工具
-  const DEBUG_MODE_STORAGE_KEY = 'shark.debugMode'
+  const DEBUG_MODE_STORAGE_KEY = 'bnguclient.debugMode'
   const isDebugMode = ref<boolean>(
     (() => {
       try {
@@ -119,12 +102,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const videoElement = ref<HTMLVideoElement | null>(null)
   const videoSize = ref({ width: 0, height: 0 }) // 视频尺寸
 
-  // ==================== 检测状态 ====================
-  const detectionEnabled = ref(false)
-  const detectionStats = ref<DetectionStats>({ ...DEFAULT_DETECTION_STATS })
-  const detections = ref<Detection[]>([])
-  const detectionFrameSize = ref({ width: 0, height: 0 })
-
   // ==================== UDP 状态 ====================
   const udpStreamStatus = ref<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected')
   const udpStats = ref<UdpStats>({ ...DEFAULT_UDP_STATS })
@@ -136,9 +113,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const useLocalBroker = ref(false)
   const localBrokerPort = ref(1883)
   const localBrokerStatus = ref<'stopped' | 'starting' | 'running' | 'error'>('stopped')
-
-  // ==================== Pipe 服务器状态 ====================
-  const pipeServerStatus = ref<PipeServerStatus>('stopped')
 
   // ==================== 机器人状态 ====================
   const robotTypes = ref<string[]>([])
@@ -159,37 +133,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const showRemainingTime = ref(true)
   let matchTimer: ReturnType<typeof setInterval> | null = null
 
-  // ==================== 性能状态 ====================
-  const enableSimulation = ref(false)
-  const performancePreset = ref<PerformancePreset>('performance')
-
-  // ==================== WebRTC 分发状态 ====================
-  const webrtcDistributeEnabled = ref(false)
-  const webrtcSignalingStatus = ref<'stopped' | 'starting' | 'running' | 'error'>('stopped')
-  const webrtcSignalingAddress = ref('')
-  const webrtcConnectedClients = ref(0)
-
   // ==================== 计算属性 ====================
-
-  /**
-   * 编码配置 (映射到 globalConfig)
-   */
-  const encodeConfig = computed({
-    get: () => globalConfig.value.encode,
-    set: (val: EncodeConfig) => {
-      globalConfig.value.encode = val
-    }
-  })
-
-  /**
-   * 检测配置 (映射到 globalConfig)
-   */
-  const detectionConfig = computed({
-    get: () => globalConfig.value.detection,
-    set: (val: DetectionConfig) => {
-      globalConfig.value.detection = val
-    }
-  })
 
   /**
    * UDP 配置 (映射到 globalConfig)
@@ -212,26 +156,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
   })
 
   /**
-   * 编码方式 (映射到 globalConfig)
-   */
-  const encodingMethod = computed({
-    get: () => globalConfig.value.encodingMethod,
-    set: (val: 'gpu' | 'cpu') => {
-      globalConfig.value.encodingMethod = val
-    }
-  })
-
-  /**
-   * GPU 支持状态 (映射到 globalConfig)
-   */
-  const gpuSupported = computed({
-    get: () => globalConfig.value.gpuSupported,
-    set: (val: boolean) => {
-      globalConfig.value.gpuSupported = val
-    }
-  })
-
-  /**
    * 根据机器人名称判断所属队伍
    */
   const selectedTeam = computed<TeamType>(() => {
@@ -246,70 +170,13 @@ export const useDashboardStore = defineStore('dashboard', () => {
    */
   const cameraStatusClass = computed(() => {
     const status = cameraStatus.value
-    if (status.includes('WebRTC') || status.includes('播放中')) return 'status-active'
+    if (status.includes('直连') || status.includes('UDP') || status.includes('播放中')) return 'status-active'
     if (status.includes('未连接')) return 'status-idle'
     if (status.includes('错误') || status.includes('失败')) return 'status-error'
     return 'status-warning'
   })
 
-  /**
-   * 检测状态文本
-   */
-  const detectionStatusText = computed(() => {
-    const serverStatus = pipeServerStatus.value
-
-    if (serverStatus === 'stopped') return '服务未启动'
-    if (serverStatus === 'starting') return '服务启动中...'
-    if (serverStatus === 'error') return '服务异常'
-    if (detectionEnabled.value) return `运行中`
-    return '服务已启动'
-  })
-
-  /**
-   * 检测状态样式类
-   */
-  const detectionStatusClass = computed(() => {
-    const serverStatus = pipeServerStatus.value
-
-    if (serverStatus === 'stopped') return 'status-idle'
-    if (serverStatus === 'starting') return 'status-loading'
-    if (serverStatus === 'error') return 'status-error'
-    if (detectionEnabled.value) return 'status-active'
-    return 'status-warning'
-  })
-
-  /**
-   * 延迟颜色类
-   */
-  const latencyClass = computed(() => {
-    const latency = detectionStats.value.totalLatency
-    if (latency < 100) return 'text-success'
-    if (latency < 200) return 'text-info'
-    if (latency < 300) return 'text-warning'
-    return 'text-danger'
-  })
-
   // ==================== Actions ====================
-
-  /**
-   * 更新编码配置
-   */
-  function updateEncodeConfig(config: Partial<EncodeConfig>): void {
-    globalConfig.value.encode = {
-      ...globalConfig.value.encode,
-      ...config
-    }
-  }
-
-  /**
-   * 更新检测配置
-   */
-  function updateDetectionConfig(config: Partial<DetectionConfig>): void {
-    globalConfig.value.detection = {
-      ...globalConfig.value.detection,
-      ...config
-    }
-  }
 
   /**
    * 更新 UDP 配置
@@ -329,51 +196,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
       ...globalConfig.value.mqtt,
       ...config
     }
-  }
-
-  /**
-   * 设置编码方式
-   */
-  function setEncodingMethod(method: 'gpu' | 'cpu'): void {
-    globalConfig.value.encodingMethod = method
-    console.log('[DashboardStore] 编码方式变更:', method)
-  }
-
-  /**
-   * 设置 GPU 支持状态
-   */
-  function setGpuSupported(supported: boolean): void {
-    globalConfig.value.gpuSupported = supported
-    if (!supported) {
-      globalConfig.value.encodingMethod = 'cpu'
-    }
-    console.log('[DashboardStore] GPU 支持变更:', supported)
-  }
-
-  /**
-   * 应用性能预设
-   */
-  function applyPreset(preset: PerformancePreset): void {
-    const config = PERFORMANCE_PRESETS[preset]
-    performancePreset.value = preset
-    globalConfig.value.performancePreset = preset
-
-    // 应用编码配置
-    globalConfig.value.encode = {
-      quality: config.encode.quality,
-      maxSize: config.encode.maxSize,
-      enableDownsample: config.encode.enableDownsample
-    }
-
-    // 应用检测配置
-    globalConfig.value.detection = {
-      ...globalConfig.value.detection,
-      armorConf: config.detect.armorConf,
-      carConf: config.detect.carConf,
-      maxSize: config.detect.maxSize
-    }
-
-    console.log(`[DashboardStore] 切换到预设: ${preset} - ${config.desc}`)
   }
 
   /**
@@ -422,60 +244,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
    */
   function setVideoElement(element: HTMLVideoElement | null): void {
     videoElement.value = element
-  }
-
-  /**
-   * 切换检测状态
-   */
-  function toggleDetection(): void {
-    detectionEnabled.value = !detectionEnabled.value
-    globalState.value.detectionEnabled = detectionEnabled.value
-  }
-
-  /**
-   * 启用/禁用检测
-   */
-  function setDetectionEnabled(enabled: boolean): void {
-    detectionEnabled.value = enabled
-    globalState.value.detectionEnabled = enabled
-  }
-
-  /**
-   * 设置 Pipe 服务器状态
-   */
-  function setPipeServerStatus(status: PipeServerStatus): void {
-    pipeServerStatus.value = status
-    globalState.value.pipeServerStatus = status
-  }
-
-  /**
-   * 更新检测统计信息
-   */
-  function updateDetectionStats(stats: Partial<DetectionStats>): void {
-    detectionStats.value = {
-      ...detectionStats.value,
-      ...stats
-    }
-  }
-
-  /**
-   * 更新检测结果
-   */
-  function updateDetections(
-    results: Detection[],
-    frameSize?: { width: number; height: number }
-  ): void {
-    detections.value = results
-    if (frameSize) {
-      detectionFrameSize.value = frameSize
-    }
-  }
-
-  /**
-   * 清空检测结果
-   */
-  function clearDetections(): void {
-    detections.value = []
   }
 
   /**
@@ -613,30 +381,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
   }
 
   /**
-   * 设置 WebRTC 分发状态
-   */
-  function setWebRTCDistributeEnabled(enabled: boolean): void {
-    webrtcDistributeEnabled.value = enabled
-  }
-
-  /**
-   * 更新 WebRTC 信令状态
-   */
-  function updateWebRTCSignaling(
-    status: 'stopped' | 'starting' | 'running' | 'error',
-    address?: string,
-    clients?: number
-  ): void {
-    webrtcSignalingStatus.value = status
-    if (address !== undefined) {
-      webrtcSignalingAddress.value = address
-    }
-    if (clients !== undefined) {
-      webrtcConnectedClients.value = clients
-    }
-  }
-
-  /**
    * 切换设置菜单可见性
    */
   function toggleSettings(): void {
@@ -669,13 +413,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
    */
   function setDrawingMode(mode: boolean): void {
     isDrawingMode.value = mode
-  }
-
-  /**
-   * 切换模拟状态
-   */
-  function toggleSimulation(): void {
-    enableSimulation.value = !enableSimulation.value
   }
 
   // ==================== 比赛状态 Actions ====================
@@ -777,27 +514,19 @@ export const useDashboardStore = defineStore('dashboard', () => {
   function resetState(): void {
     // 重置 globalConfig
     globalConfig.value = {
-      encode: { ...DEFAULT_ENCODE_CONFIG },
-      detection: { ...DEFAULT_DETECTION_CONFIG },
       udp: { ...DEFAULT_UDP_CONFIG },
-      mqtt: { ...DEFAULT_MQTT_CONFIG },
-      performancePreset: 'performance',
-      encodingMethod: 'cpu',
-      gpuSupported: false
+      mqtt: { ...DEFAULT_MQTT_CONFIG }
     }
 
     // 重置 globalState
     globalState.value = {
       videoSource: 'udp',
       videoConnected: false,
-      detectionEnabled: false,
-      pipeServerStatus: 'stopped',
       udpStreamStatus: 'disconnected',
       mqttStatus: 'disconnected'
     }
 
     // 重置其他状态
-    detectionStats.value = { ...DEFAULT_DETECTION_STATS }
     udpStats.value = { ...DEFAULT_UDP_STATS }
     mqttStats.value = { ...DEFAULT_MQTT_STATS }
     mqttMessages.value = []
@@ -832,12 +561,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
     videoElement,
     videoSize,
 
-    // 检测状态
-    detectionEnabled,
-    detectionStats,
-    detections,
-    detectionFrameSize,
-
     // UDP 状态
     udpStreamStatus,
     udpStats,
@@ -849,9 +572,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
     useLocalBroker,
     localBrokerPort,
     localBrokerStatus,
-
-    // Pipe 服务器状态
-    pipeServerStatus,
 
     // 机器人状态
     robotTypes,
@@ -872,37 +592,15 @@ export const useDashboardStore = defineStore('dashboard', () => {
     showRemainingTime,
     formattedMatchTime,
 
-    // 性能状态
-    enableSimulation,
-    performancePreset,
-
-    // WebRTC 分发状态
-    webrtcDistributeEnabled,
-    webrtcSignalingStatus,
-    webrtcSignalingAddress,
-    webrtcConnectedClients,
-
     // 计算属性
-    encodeConfig,
-    detectionConfig,
     udpConfig,
     mqttConfig,
-    encodingMethod,
-    gpuSupported,
     selectedTeam,
     cameraStatusClass,
-    detectionStatusText,
-    detectionStatusClass,
-    latencyClass,
 
     // Actions - 配置更新
-    updateEncodeConfig,
-    updateDetectionConfig,
     updateUdpConfig,
     updateMqttConfig,
-    setEncodingMethod,
-    setGpuSupported,
-    applyPreset,
 
     // Actions - 视频控制
     setVideoSource,
@@ -910,14 +608,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
     setVideoFilePath,
     setSelectedCameraId,
     setVideoElement,
-
-    // Actions - 检测控制
-    toggleDetection,
-    setDetectionEnabled,
-    setPipeServerStatus,
-    updateDetectionStats,
-    updateDetections,
-    clearDetections,
 
     // Actions - UDP 控制
     setUdpStreamStatus,
@@ -940,17 +630,12 @@ export const useDashboardStore = defineStore('dashboard', () => {
     updateAmmo,
     purchaseAmmo,
 
-    // Actions - WebRTC 控制
-    setWebRTCDistributeEnabled,
-    updateWebRTCSignaling,
-
     // Actions - UI 控制
     toggleSettings,
     setActiveTab,
     toggleHudInteractive,
     setHudInteractive,
     setDrawingMode,
-    toggleSimulation,
 
     // Actions - 比赛状态控制
     setMatchStatus,

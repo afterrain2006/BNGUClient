@@ -41,7 +41,6 @@ flowchart TD
 - `src/stores/connectionStore.ts`: connection metadata and ingress counters.
 - `src/composables/useTelemetryView.ts`: read-only projections for Dashboard and
   existing XML/YAML binding paths. It owns no decoded state or MQTT listener.
-- `src/domain/vision/Detection.ts`: generic detector results, not an MQTT type.
 
 ## Identity and lifecycle
 
@@ -61,6 +60,9 @@ History values are not republished as new reports.
 
 ## Removed
 
+- AI detection components, Python service, shared-memory bridge, model archive,
+  placeholder WebRTC distribution and legacy AI packaging variants. The product
+  is BNGUClient; UDP video decoding remains independent of telemetry and AI.
 - `src/store/modules/mqtt_data.ts`
 - `src/mqtt/mqttDecoder.worker.ts`
 - `src/mqtt/mqttPayloadDecoder.ts`

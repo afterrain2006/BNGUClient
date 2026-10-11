@@ -134,106 +134,109 @@ unsafe extern "C" {
 
 // ── Shim functions (defined in src/ffmpeg_shim.c, compiled by build.rs) ──
 unsafe extern "C" {
-    pub fn shark_ffmpeg_set_log_level_error();
-    pub fn shark_frame_data(f: *const AVFrame, plane: c_int) -> *const u8;
-    pub fn shark_frame_linesize(f: *const AVFrame, plane: c_int) -> c_int;
-    pub fn shark_frame_width(f: *const AVFrame) -> c_int;
-    pub fn shark_frame_height(f: *const AVFrame) -> c_int;
-    pub fn shark_frame_format(f: *const AVFrame) -> c_int;
-    pub fn shark_packet_set(pkt: *mut AVPacket, data: *mut u8, size: c_int);
-    pub fn shark_packet_size(pkt: *const AVPacket) -> c_int;
-    pub fn shark_packet_data(pkt: *const AVPacket) -> *const u8;
-    pub fn shark_set_hw_device(ctx: *mut AVCodecContext, device_ref: *mut AVBufferRef) -> c_int;
-    pub fn shark_set_hw_pixel_format(ctx: *mut AVCodecContext, pix_fmt: c_int) -> c_int;
-    pub fn shark_codec_set_low_delay(ctx: *mut AVCodecContext);
-    pub fn shark_codec_supports_hw(
+    pub fn bnguclient_ffmpeg_set_log_level_error();
+    pub fn bnguclient_frame_data(f: *const AVFrame, plane: c_int) -> *const u8;
+    pub fn bnguclient_frame_linesize(f: *const AVFrame, plane: c_int) -> c_int;
+    pub fn bnguclient_frame_width(f: *const AVFrame) -> c_int;
+    pub fn bnguclient_frame_height(f: *const AVFrame) -> c_int;
+    pub fn bnguclient_frame_format(f: *const AVFrame) -> c_int;
+    pub fn bnguclient_packet_set(pkt: *mut AVPacket, data: *mut u8, size: c_int);
+    pub fn bnguclient_packet_size(pkt: *const AVPacket) -> c_int;
+    pub fn bnguclient_packet_data(pkt: *const AVPacket) -> *const u8;
+    pub fn bnguclient_set_hw_device(
+        ctx: *mut AVCodecContext,
+        device_ref: *mut AVBufferRef,
+    ) -> c_int;
+    pub fn bnguclient_set_hw_pixel_format(ctx: *mut AVCodecContext, pix_fmt: c_int) -> c_int;
+    pub fn bnguclient_codec_set_low_delay(ctx: *mut AVCodecContext);
+    pub fn bnguclient_codec_supports_hw(
         codec: *const AVCodec,
         device_type: c_int,
         pix_fmt: c_int,
     ) -> c_int;
 
-    pub fn shark_averror_eagain() -> c_int;
-    pub fn shark_averror_eof() -> c_int;
+    pub fn bnguclient_averror_eagain() -> c_int;
+    pub fn bnguclient_averror_eof() -> c_int;
 
-    pub fn shark_pix_fmt_none() -> c_int;
-    pub fn shark_pix_fmt_yuv420p() -> c_int;
-    pub fn shark_pix_fmt_nv12() -> c_int;
-    pub fn shark_pix_fmt_d3d11() -> c_int;
-    pub fn shark_pix_fmt_d3d11va_vld() -> c_int;
-    pub fn shark_pix_fmt_dxva2_vld() -> c_int;
-    pub fn shark_pix_fmt_vaapi() -> c_int;
-    pub fn shark_pix_fmt_cuda() -> c_int;
-    pub fn shark_pix_fmt_qsv() -> c_int;
+    pub fn bnguclient_pix_fmt_none() -> c_int;
+    pub fn bnguclient_pix_fmt_yuv420p() -> c_int;
+    pub fn bnguclient_pix_fmt_nv12() -> c_int;
+    pub fn bnguclient_pix_fmt_d3d11() -> c_int;
+    pub fn bnguclient_pix_fmt_d3d11va_vld() -> c_int;
+    pub fn bnguclient_pix_fmt_dxva2_vld() -> c_int;
+    pub fn bnguclient_pix_fmt_vaapi() -> c_int;
+    pub fn bnguclient_pix_fmt_cuda() -> c_int;
+    pub fn bnguclient_pix_fmt_qsv() -> c_int;
 
-    pub fn shark_hw_device_type_d3d11va() -> c_int;
-    pub fn shark_hw_device_type_dxva2() -> c_int;
-    pub fn shark_hw_device_type_vaapi() -> c_int;
-    pub fn shark_hw_device_type_cuda() -> c_int;
-    pub fn shark_hw_device_type_qsv() -> c_int;
+    pub fn bnguclient_hw_device_type_d3d11va() -> c_int;
+    pub fn bnguclient_hw_device_type_dxva2() -> c_int;
+    pub fn bnguclient_hw_device_type_vaapi() -> c_int;
+    pub fn bnguclient_hw_device_type_cuda() -> c_int;
+    pub fn bnguclient_hw_device_type_qsv() -> c_int;
 }
 
 #[inline]
 pub fn is_eagain(code: c_int) -> bool {
-    code == unsafe { shark_averror_eagain() }
+    code == unsafe { bnguclient_averror_eagain() }
 }
 
 #[inline]
 pub fn is_eof(code: c_int) -> bool {
-    code == unsafe { shark_averror_eof() }
+    code == unsafe { bnguclient_averror_eof() }
 }
 
 #[inline]
 pub fn pix_fmt_yuv420p() -> c_int {
-    unsafe { shark_pix_fmt_yuv420p() }
+    unsafe { bnguclient_pix_fmt_yuv420p() }
 }
 #[inline]
 pub fn pix_fmt_nv12() -> c_int {
-    unsafe { shark_pix_fmt_nv12() }
+    unsafe { bnguclient_pix_fmt_nv12() }
 }
 #[inline]
 pub fn pix_fmt_d3d11() -> c_int {
-    unsafe { shark_pix_fmt_d3d11() }
+    unsafe { bnguclient_pix_fmt_d3d11() }
 }
 #[inline]
 pub fn pix_fmt_d3d11va_vld() -> c_int {
-    unsafe { shark_pix_fmt_d3d11va_vld() }
+    unsafe { bnguclient_pix_fmt_d3d11va_vld() }
 }
 #[inline]
 pub fn pix_fmt_dxva2_vld() -> c_int {
-    unsafe { shark_pix_fmt_dxva2_vld() }
+    unsafe { bnguclient_pix_fmt_dxva2_vld() }
 }
 #[inline]
 pub fn pix_fmt_vaapi() -> c_int {
-    unsafe { shark_pix_fmt_vaapi() }
+    unsafe { bnguclient_pix_fmt_vaapi() }
 }
 #[inline]
 pub fn pix_fmt_cuda() -> c_int {
-    unsafe { shark_pix_fmt_cuda() }
+    unsafe { bnguclient_pix_fmt_cuda() }
 }
 #[inline]
 pub fn pix_fmt_qsv() -> c_int {
-    unsafe { shark_pix_fmt_qsv() }
+    unsafe { bnguclient_pix_fmt_qsv() }
 }
 
 #[inline]
 pub fn hw_device_type_d3d11va() -> c_int {
-    unsafe { shark_hw_device_type_d3d11va() }
+    unsafe { bnguclient_hw_device_type_d3d11va() }
 }
 #[inline]
 pub fn hw_device_type_dxva2() -> c_int {
-    unsafe { shark_hw_device_type_dxva2() }
+    unsafe { bnguclient_hw_device_type_dxva2() }
 }
 #[inline]
 pub fn hw_device_type_vaapi() -> c_int {
-    unsafe { shark_hw_device_type_vaapi() }
+    unsafe { bnguclient_hw_device_type_vaapi() }
 }
 #[inline]
 pub fn hw_device_type_cuda() -> c_int {
-    unsafe { shark_hw_device_type_cuda() }
+    unsafe { bnguclient_hw_device_type_cuda() }
 }
 #[inline]
 pub fn hw_device_type_qsv() -> c_int {
-    unsafe { shark_hw_device_type_qsv() }
+    unsafe { bnguclient_hw_device_type_qsv() }
 }
 
 /// Helper: format an FFmpeg negative error code as a Rust `String`.

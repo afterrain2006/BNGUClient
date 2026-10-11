@@ -2,7 +2,7 @@
 
 基于 [JNU-SHARK/SharkClient](https://github.com/JNU-SHARK/SharkClient) 渐进式重构的 RoboMaster 客户端，使用 Tauri 2、Vue 3、Pinia 和 Rust。
 
-本仓库是本次开发的收尾版本：遥测已切换到新数据链，键鼠采集与 RM2026 编码已分离，原有 HUD 和视频功能保留。它不是已完成官方赛事服务器和实机验收的承诺。上游作者信息和 GPL-3.0 许可证保留；部分二进制名、包名和资源中的 SharkClient 标识暂未改名，以免破坏既有构建和配置兼容性。
+本项目聚焦自定义客户端：MQTT 遥测、键鼠操控、UDP 图传、HUD 和自定义数据入口。遥测使用新数据链，键鼠采集与 RM2026 编码分离。AI 检测、Python 服务、共享内存检测桥接、占位 WebRTC 分发和历史 AI 打包分支已移除。应用、程序和包名统一为 BNGUClient，上游作者信息和 GPL-3.0 许可证保留。源码检查通过不代表已完成官方赛事服务器和实机验收。
 
 ## 从哪里开始
 
@@ -53,12 +53,12 @@ flowchart LR
 | `src/rules/` | 通用规则契约；`rm2026/` 实现赛事协议转换 |
 | `src/input/` | 遥测分发、连接生命周期、自定义数据解析接入 |
 | `src/output/` | 控制输入发送、合并待发送输入、连接切换清理 |
-| `src/domain/` | 机器人、比赛和检测领域数据 |
+| `src/domain/` | 机器人和比赛领域数据 |
 | `src/stores/` | 遥测状态、连接元数据和 UI 选择 |
 | `src/store/` | 保留的 Dashboard/HUD 等界面配置状态，不是旧遥测链 |
 | `src/composables/` | UI 遥测投影与新鲜度时钟 |
 | `src/views/`、`src/components/` | 视图、HUD、输入采集、视频显示 |
-| `src-tauri/` | Rust MQTT、UDP 组帧、解码、共享内存与桌面接口 |
+| `src-tauri/` | Rust MQTT、UDP 组帧、解码与桌面接口 |
 | `resources/` | 地图、机器人配置、HUD 模板、自定义协议样例 |
 | `UDP-MQTT Server/proto/messages.proto` | 已提交的 MQTT 协议源，生成与 Mock 共用 |
 | `tests/` | 遥测、身份、状态、架构边界和操控链回归测试 |
@@ -114,10 +114,12 @@ git diff --check
 `npm run build` 只生成 `dist/`，不是桌面安装包。默认桌面构建：
 
 ```powershell
-npm run tauri -- build
+npm run build:desktop
 ```
 
-原有 lite/mini/single、Linux、Flatpak 打包脚本仍保留。带 `internal-ffmpeg` 的构建须预先生成 FFmpeg 静态库；某些历史打包脚本还要求额外的 ONNX Runtime 等资源。本次收尾不代表所有发行形态均已重新验收。
+默认生成 `src-tauri/target/release/BNGUClient.exe`（Windows）或同目录的 `BNGUClient`（Linux）。Windows 安装器使用 `npm run build:installer`；Linux 可用 `npm run tauri -- build --bundles deb,appimage`。`npm run build:linux` 执行依赖安装、检查和桌面构建，不安装系统工具或 AI 环境。带 `internal-ffmpeg` 的构建仍须先生成 FFmpeg 静态库。
+
+应用标识为 `io.github.afterrain2006.bnguclient`，日志和视频环境变量使用 `BNGUCLIENT_` 前缀，界面偏好键使用 `bnguclient.` 前缀。旧应用缓存不自动删除或迁移；如曾配置旧环境变量，需要改用新名称。
 
 ## 协议源与本地联调
 
@@ -132,12 +134,12 @@ npm run verify:mqtt-proto
 
 本地测试服务的启动、Client ID 与视频配置见 [Mock Server 说明](tools/rm2026-mock-server/README.md)。Mock 的采样频率和消息覆盖只用于测试，不是官方服务器能力或实机验收结果。
 
-## 视频与可选 AI
+## 视频
 
 - UDP 默认监听 `0.0.0.0:3334`，解析 8 字节大端分片头，支持 H.265 组帧和 MJPEG。
 - H.265 使用 Rust 解码后显示本地 MJPEG。解码队列过载会丢弃积压数据并等待关键帧；CPU/GPU 性能和发送端关键帧配置仍会影响延迟。
-- 内嵌 FFmpeg 为可选 feature；外部 FFmpeg 可通过 `SHARK_FFMPEG_PATH` 指定，缺失时有 libde265 软件解码路径。本仓库不附带生成的 FFmpeg 二进制。
-- AI 检测是可选外置 Python 服务。上游源码包 `SharkVisionLiteServer-open-source-v1.0.0-20260519.zip` 保留；按其 README 安装依赖。运行期可通过 `SHARK_AI_ROOT` 指定服务目录。
+- 内嵌 FFmpeg 为可选 feature；外部 FFmpeg 可通过 `BNGUCLIENT_FFMPEG_PATH` 指定，缺失时有 libde265 软件解码路径。本仓库不附带生成的 FFmpeg 二进制。
+- 客户端不包含 AI 检测、模型或 Python 运行环境，不需要为基础使用安装 CUDA、TensorRT 或 ONNX Runtime。视频硬件解码仍独立保留。
 - 测试视频由 FFmpeg testsrc2 生成，不使用赛事视频素材。
 
 ## 已知边界

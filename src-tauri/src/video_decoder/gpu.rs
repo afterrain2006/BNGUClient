@@ -134,7 +134,7 @@ fn collect_ffmpeg_candidates() -> Vec<PathBuf> {
     let binary_name = ffmpeg_binary_name();
     let platform_dir = node_ffmpeg_platform_dir();
 
-    if let Ok(explicit_path) = std::env::var("SHARK_FFMPEG_PATH") {
+    if let Ok(explicit_path) = std::env::var("BNGUCLIENT_FFMPEG_PATH") {
         let trimmed = explicit_path.trim();
         if !trimmed.is_empty() {
             push_candidate(&mut candidates, PathBuf::from(trimmed));
@@ -295,10 +295,10 @@ impl GpuDecoder {
         // Optional downscale cap to control IPC bandwidth.
         //   Raw YUV420P at 1080p = 1920*1080*1.5 ≈ 3.1 MB/frame → 90 MB/s at 30 FPS.
         //   Capping at 720p cuts this by ~55% while remaining visually acceptable for
-        //   a HUD overlay. User can override via env var SHARK_VIDEO_MAX_HEIGHT:
+        //   a HUD overlay. User can override via env var BNGUCLIENT_VIDEO_MAX_HEIGHT:
         //     - 0 or "none": disable scaling (full source resolution)
         //     - N (positive integer): cap height to N, width auto (even-aligned)
-        let max_height: u32 = std::env::var("SHARK_VIDEO_MAX_HEIGHT")
+        let max_height: u32 = std::env::var("BNGUCLIENT_VIDEO_MAX_HEIGHT")
             .ok()
             .and_then(|v| {
                 let trimmed = v.trim().to_ascii_lowercase();
@@ -331,7 +331,7 @@ impl GpuDecoder {
         let mut extra_hw_args: Vec<String> = Vec::new();
         let mut filter_chain: Vec<String> = Vec::new();
         if hwaccel == "vaapi" && cfg!(target_os = "linux") {
-            let device = std::env::var("SHARK_VAAPI_DEVICE")
+            let device = std::env::var("BNGUCLIENT_VAAPI_DEVICE")
                 .unwrap_or_else(|_| "/dev/dri/renderD128".to_string());
             extra_hw_args.push("-vaapi_device".to_string());
             extra_hw_args.push(device);

@@ -1,6 +1,6 @@
 # RM2026 Mock Server
 
-用于 SharkClient Windows 原生开发的本地 RoboMaster 2026 基线服务。它与客户端源码解耦，只提供本地 MQTT Broker、真实仓库 Protobuf 消息和 RM2026 UDP H.265 分片流。
+用于 BNGUClient 原生开发的本地 RoboMaster 2026 基线服务。它与客户端源码解耦，只提供本地 MQTT Broker、真实仓库 Protobuf 消息和 RM2026 UDP H.265 分片流。
 
 ## 功能
 
@@ -28,7 +28,7 @@ npm run dev
 npm run generate-video
 ```
 
-## 连接 SharkClient
+## 连接 BNGUClient
 
 1. 启动 Mock Server。
 2. 图传页按 P 打开 Dashboard 设置，在“机器人连接”把 IP 地址设为 `127.0.0.1`（不要填 mqtt:// 前缀），MQTT 端口设为 `3333`，Client ID 设为 `3`，点击连接。

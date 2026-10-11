@@ -1,25 +1,22 @@
 [package]
-name = "shark-client-rust-version"
+name = "bnguclient"
 version = "1.0.0"
-description = "SharkClientRustVersion"
-authors = ["JNU-Shark"]
+description = "BNGUClient"
+authors = ["BNGUClient contributors", "JNU-Shark"]
 edition = "2021"
 
 [[bin]]
-name = "SharkClientRustVersion"
+name = "BNGUClient"
 path = "src/main.rs"
 
 [lib]
 # The `_lib` suffix is required on Windows so the library name stays unique
 # and does not conflict with the binary name.
-name = "shark_client_rust_version_lib"
+name = "bnguclient_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 default = []
-# Kept for packaging compatibility. AI detection now runs in an external
-# Python process, so this feature no longer embeds ONNX weights.
-lite = []
 # Embedded FFmpeg static libraries. Build the static libs with
 # scripts/build-ffmpeg-minimal.ps1 / .sh before enabling this feature.
 internal-ffmpeg = []
@@ -35,7 +32,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9.34"
 tokio = { version = "1.51.0", features = ["process", "rt", "rt-multi-thread", "macros", "sync", "net"] }
-sysinfo = "0.38.4"
 tauri-plugin-dialog = "2.7.0"
 rumqttc = "0.25.1"
 socket2 = "0.5"

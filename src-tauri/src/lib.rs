@@ -1,6 +1,5 @@
 mod config;
 mod mqtt_client;
-mod shm_bridge;
 mod udp_bridge;
 mod video_decoder;
 
@@ -145,14 +144,14 @@ fn install_stdio_panic_swallower() {
 
 /// Initialize the global `tracing` subscriber.
 ///
-/// Reads `SHARK_LOG` (and falls back to `RUST_LOG`) for level filtering.
-/// Default filter: `info` everywhere. Set `SHARK_LOG=debug` for the full
-/// per-frame diagnostics, or `SHARK_LOG=shark_client_rust_version_lib::udp_bridge=debug`
+/// Reads `BNGUCLIENT_LOG` (and falls back to `RUST_LOG`) for level filtering.
+/// Default filter: `info` everywhere. Set `BNGUCLIENT_LOG=debug` for the full
+/// per-frame diagnostics, or `BNGUCLIENT_LOG=bnguclient_lib::udp_bridge=debug`
 /// to scope to a single submodule.
 fn init_tracing() {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-    let env_filter = EnvFilter::try_from_env("SHARK_LOG")
+    let env_filter = EnvFilter::try_from_env("BNGUCLIENT_LOG")
         .or_else(|_| EnvFilter::try_from_default_env())
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
@@ -166,7 +165,7 @@ fn init_tracing() {
 /// Non-fatal: best-effort only.
 fn print_startup_diagnostics() {
     let cache_dir = config::ensure_cache_dir();
-    info!("========== SharkClientRust startup ==========");
+    info!("========== BNGUClient startup ==========");
     info!(target: "diag", "OS        : {}", std::env::consts::OS);
     info!(target: "diag", "Arch      : {}", std::env::consts::ARCH);
     info!(target: "diag", "Family    : {}", std::env::consts::FAMILY);
@@ -184,10 +183,6 @@ fn print_startup_diagnostics() {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "<unknown>".into())
     );
-    info!(target: "diag", "AI backend: external Python script (manual start)");
-    if let Ok(v) = std::env::var("SHARK_AI_SERVER_PATH") {
-        info!(target: "diag", "AI path   : (env override) {}", v);
-    }
     info!(target: "diag", "CacheDir  : {}", cache_dir.display());
     info!("=============================================");
 }
@@ -202,8 +197,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(udp_bridge::UdpBridgeState::default())
         .manage(mqtt_client::MqttState::default())
-        .manage(shm_bridge::PipeServerState::default())
-        .manage(shm_bridge::PipeClientState::default())
         .setup(|app| {
             let window = create_main_window(app)?;
             let _ = window.set_fullscreen(true);
@@ -242,7 +235,6 @@ pub fn run() {
             config::dashboard_config_save,
             config::dashboard_config_delete,
             config::dashboard_config_check_panel_usage,
-            config::get_model_path,
             config::hud_get_templates,
             config::hud_save_template,
             config::hud_update_template_title,
@@ -274,16 +266,6 @@ pub fn run() {
             mqtt_client::local_broker::mqtt_start_local_broker,
             mqtt_client::local_broker::mqtt_stop_local_broker,
             mqtt_client::local_broker::mqtt_get_local_broker_status,
-            shm_bridge::shm_connect,
-            shm_bridge::shm_disconnect,
-            shm_bridge::shm_status,
-            shm_bridge::shm_detect,
-            shm_bridge::shm_detect_latest_mjpeg,
-            shm_bridge::pipe_server_start,
-            shm_bridge::pipe_server_stop,
-            shm_bridge::pipe_server_get_status,
-            shm_bridge::start_signaling_server,
-            shm_bridge::stop_signaling_server,
             video_decoder::get_decode_capabilities
         ])
         .on_window_event(|window, event| {

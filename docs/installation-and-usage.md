@@ -12,7 +12,7 @@
 | 生成前端静态文件 | `npm run build` | 生成 dist，不生成 exe/安装包 |
 | 构建桌面发行程序 | `npm run tauri -- build --no-bundle` | 编译前端和 Rust，不生成安装器 |
 
-首次只想看效果：完成 Windows 环境与依赖安装后，用桌面开发命令。没有真实机器人时再启动第 5 节的 Mock。AI、CUDA、TensorRT 和内嵌 FFmpeg **不是基础遥测联调的前置条件**。
+首次只想看效果：完成 Windows 环境与依赖安装后，用桌面开发命令。没有真实机器人时再启动第 5 节的 Mock。客户端已移除 AI 检测，不需要 Python、模型或 AI 环境；内嵌 FFmpeg 也不是基础联调的前置条件。
 
 ## 2. Windows 环境安装
 
@@ -54,14 +54,7 @@ npm run check
 
 已经有工作目录时不要再次在里面 clone；先用 `git status`、`git remote -v` 确认目录与本地改动，再决定是否更新。不要为了更新执行 `git reset --hard`。
 
-上游 AI 源码 zip 使用 Git LFS。基础客户端不需要解压它；需要 AI 时，先安装 [Git LFS](https://git-lfs.com/)，在仓库根目录执行：
-
-```powershell
-git lfs install --local
-git lfs pull
-```
-
-如果 zip 内容只是几行 `version https://git-lfs.github.com/spec/v1` 文本，说明拿到的是 LFS 指针，不是压缩包。不要将这个指针当作 zip 解压。
+当前源码不再包含 AI 源码发行包，不需要 Git LFS 或额外 Python 环境即可运行客户端。
 
 ### 2.3 启动真正的客户端
 
@@ -117,7 +110,7 @@ Node.js 与 Rust 的安装分别参考其官方安装页，发行版 apt 自带�
 | P | 打开/关闭 Dashboard 设置菜单 |
 | 按住 Backspace | 暂时退出键鼠捕获；松开后满足条件会恢复，不是持久暂停开关 |
 | Esc | 退出 HUD 编辑（处于编辑模式时） |
-| F6 / F7 | AI 检测开关 / 准星设置 |
+| F7 | 准星设置 |
 | F8 / H | 打开弹丸购买 / 远程补弹菜单，不等于请求已经执行 |
 | +（Equal）/ - / Delete | 视频放大 / 缩小 / 恢复 |
 | F11 | 全屏切换（需底部设置中的相应开关启用） |
@@ -199,10 +192,12 @@ npm run check
 npm run tauri -- build --no-bundle
 ```
 
-Windows 默认生成 `src-tauri/target/release/SharkClientRustVersion.exe`，Linux 为同目录下无 .exe 后缀的二进制。保留上游名是兼容性选择，不代表编译了参考目录。无 bundle 的 exe 不等于自包含便携包，资源查找和依赖仍须核对，不要只复制一个 exe 就承诺可部署。
+Windows 默认生成 `src-tauri/target/release/BNGUClient.exe`，Linux 为同目录下无 .exe 后缀的二进制。也可用 `npm run build:desktop` 执行不打包构建。无 bundle 的 exe 不等于自包含便携包，资源查找和依赖仍须核对，不要只复制一个 exe 就承诺可部署。
 
-需要 Windows 安装器时，可明确限定为 `npm run tauri -- build --bundles nsis`；Linux 的 deb/AppImage 按相应平台打包。旧 lite/mini/single 系列依赖各有差异，不作为首次运行路线。发布安装包前还应做干净机器验收。
+需要 Windows 安装器时，用 `npm run build:installer`；Linux 用 `npm run tauri -- build --bundles deb,appimage`。历史 lite/mini/single 和依赖 AI 的 Flatpak 打包脚本已移除。发布安装包前还应做干净机器验收。
+
+产品名为 BNGUClient，应用标识为 `io.github.afterrain2006.bnguclient`。日志、缓存和视频配置使用 `BNGUCLIENT_` 环境变量，界面偏好使用 `bnguclient.` 设置键。旧应用偏好不会自动导入，旧缓存也不会自动删除；升级后重新确认连接参数和快捷键。
 
 修改前端代码通常有 Vite 热更新；Rust 修改需要重新编译；资源 XML/YAML 不应假设每处都自动重读，必要时重新加载配置或重启。修改 MQTT proto 后运行 generate:mqtt-proto 和 verify:mqtt-proto，提交生成 JSON。
 
-基础联调通过后再考虑外置 AI、SHARK_AI_ROOT、外部 FFmpeg 或 internal-ffmpeg。电控自定义字节解析和图片重组尚未完成，详见 README“已知边界”，不能通过安装额外依赖让占位函数自动可用。
+外部 FFmpeg 可用 `BNGUCLIENT_FFMPEG_PATH` 指定，internal-ffmpeg 是可选视频构建方式，与 AI 无关。电控自定义字节解析和图片重组尚未完成，详见 README“已知边界”，不能通过安装额外依赖让占位函数自动可用。

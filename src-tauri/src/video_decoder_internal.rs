@@ -38,7 +38,7 @@ unsafe impl Send for InternalDecoder {}
 impl InternalDecoder {
     pub fn try_new() -> Result<Self, String> {
         unsafe {
-            ff::shark_ffmpeg_set_log_level_error();
+            ff::bnguclient_ffmpeg_set_log_level_error();
 
             let codec = ff::avcodec_find_decoder(ff::AV_CODEC_ID_HEVC);
             if codec.is_null() {
@@ -47,7 +47,8 @@ impl InternalDecoder {
 
             let mut last_hw_error: Option<String> = None;
             for candidate in hardware_candidates() {
-                if ff::shark_codec_supports_hw(codec, candidate.device_type, candidate.pix_fmt) == 0
+                if ff::bnguclient_codec_supports_hw(codec, candidate.device_type, candidate.pix_fmt)
+                    == 0
                 {
                     continue;
                 }
@@ -78,7 +79,7 @@ impl InternalDecoder {
                 return Err("avcodec_alloc_context3 returned NULL".into());
             }
 
-            ff::shark_codec_set_low_delay(codec_ctx);
+            ff::bnguclient_codec_set_low_delay(codec_ctx);
 
             let mut hw_device: *mut ff::AVBufferRef = ptr::null_mut();
             let mut hw_pix_fmt = ff::pix_fmt_yuv420p();
@@ -109,7 +110,7 @@ impl InternalDecoder {
                     return Err(format!("av_hwdevice_ctx_create failed: {}", ff::errstr(rc)));
                 }
 
-                let rc = ff::shark_set_hw_device(codec_ctx, hw_device);
+                let rc = ff::bnguclient_set_hw_device(codec_ctx, hw_device);
                 if rc < 0 {
                     cleanup_parts(
                         codec_ctx,
@@ -122,7 +123,7 @@ impl InternalDecoder {
                     return Err("failed to attach hw_device_ctx to decoder".into());
                 }
 
-                let rc = ff::shark_set_hw_pixel_format(codec_ctx, candidate.pix_fmt);
+                let rc = ff::bnguclient_set_hw_pixel_format(codec_ctx, candidate.pix_fmt);
                 if rc < 0 {
                     cleanup_parts(
                         codec_ctx,
@@ -215,7 +216,7 @@ impl InternalDecoder {
                 input_size -= consumed;
 
                 if out_size > 0 {
-                    ff::shark_packet_set(self.pkt, out_buf, out_size);
+                    ff::bnguclient_packet_set(self.pkt, out_buf, out_size);
                     let send_rc = ff::avcodec_send_packet(self.codec_ctx, self.pkt);
                     if send_rc < 0 && !ff::is_eagain(send_rc) {
                         warn!(error = %ff::errstr(send_rc), "avcodec_send_packet failed");
@@ -244,8 +245,8 @@ impl InternalDecoder {
                 return Err(format!("avcodec_receive_frame failed: {}", ff::errstr(rc)));
             }
 
-            let w = ff::shark_frame_width(self.frame);
-            let h = ff::shark_frame_height(self.frame);
+            let w = ff::bnguclient_frame_width(self.frame);
+            let h = ff::bnguclient_frame_height(self.frame);
             if w <= 0 || h <= 0 {
                 ff::av_frame_unref(self.frame);
                 return Ok(None);
@@ -278,7 +279,7 @@ impl InternalDecoder {
             let mut src = self.frame;
             let mut src_width = width;
             let mut src_height = height;
-            let mut fmt = ff::shark_frame_format(self.frame);
+            let mut fmt = ff::bnguclient_frame_format(self.frame);
 
             if is_hw_pixel_format(fmt) {
                 ff::av_frame_unref(self.sw_frame);
@@ -290,11 +291,11 @@ impl InternalDecoder {
                     ));
                 }
                 src = self.sw_frame;
-                let sw_width = ff::shark_frame_width(src);
-                let sw_height = ff::shark_frame_height(src);
+                let sw_width = ff::bnguclient_frame_width(src);
+                let sw_height = ff::bnguclient_frame_height(src);
                 src_width = if sw_width > 0 { sw_width } else { width };
                 src_height = if sw_height > 0 { sw_height } else { height };
-                fmt = ff::shark_frame_format(src);
+                fmt = ff::bnguclient_frame_format(src);
             }
 
             if fmt == ff::pix_fmt_yuv420p() {
@@ -353,8 +354,8 @@ fn hw_device_name(candidate: HwCandidate) -> Option<CString> {
         return None;
     }
 
-    let device =
-        std::env::var("SHARK_VAAPI_DEVICE").unwrap_or_else(|_| "/dev/dri/renderD128".to_string());
+    let device = std::env::var("BNGUCLIENT_VAAPI_DEVICE")
+        .unwrap_or_else(|_| "/dev/dri/renderD128".to_string());
     let trimmed = device.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("auto") {
         None
@@ -385,16 +386,16 @@ unsafe fn copy_yuv420p(
         let total = w * h + cw * ch * 2;
         let mut data: Vec<u8> = Vec::with_capacity(total);
 
-        let y_src = ff::shark_frame_data(frame, 0);
-        let u_src = ff::shark_frame_data(frame, 1);
-        let v_src = ff::shark_frame_data(frame, 2);
+        let y_src = ff::bnguclient_frame_data(frame, 0);
+        let u_src = ff::bnguclient_frame_data(frame, 1);
+        let v_src = ff::bnguclient_frame_data(frame, 2);
         if y_src.is_null() || u_src.is_null() || v_src.is_null() {
             return Err("decoded yuv420p frame has a null plane".into());
         }
 
-        let y_stride = ff::shark_frame_linesize(frame, 0);
-        let u_stride = ff::shark_frame_linesize(frame, 1);
-        let v_stride = ff::shark_frame_linesize(frame, 2);
+        let y_stride = ff::bnguclient_frame_linesize(frame, 0);
+        let u_stride = ff::bnguclient_frame_linesize(frame, 1);
+        let v_stride = ff::bnguclient_frame_linesize(frame, 2);
         if y_stride < w as c_int || u_stride < cw as c_int || v_stride < cw as c_int {
             return Err("decoded yuv420p frame has an invalid stride".into());
         }
@@ -438,14 +439,14 @@ unsafe fn copy_nv12_to_yuv420p(
         let total = w * h + cw * ch * 2;
         let mut data = Vec::with_capacity(total);
 
-        let y_src = ff::shark_frame_data(frame, 0);
-        let uv_src = ff::shark_frame_data(frame, 1);
+        let y_src = ff::bnguclient_frame_data(frame, 0);
+        let uv_src = ff::bnguclient_frame_data(frame, 1);
         if y_src.is_null() || uv_src.is_null() {
             return Err("decoded nv12 frame has a null plane".into());
         }
 
-        let y_stride = ff::shark_frame_linesize(frame, 0);
-        let uv_stride = ff::shark_frame_linesize(frame, 1);
+        let y_stride = ff::bnguclient_frame_linesize(frame, 0);
+        let uv_stride = ff::bnguclient_frame_linesize(frame, 1);
         if y_stride < w as c_int || uv_stride < (cw * 2) as c_int {
             return Err("decoded nv12 frame has an invalid stride".into());
         }

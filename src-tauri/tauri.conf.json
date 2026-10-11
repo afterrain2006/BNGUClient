@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SharkClientRustVersion",
+  "productName": "BNGUClient",
   "version": "1.0.0",
-  "identifier": "com.xu.tauri-temp",
+  "identifier": "io.github.afterrain2006.bnguclient",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "create": false,
-        "title": "SharkClientRustVersion",
+        "title": "BNGUClient",
         "width": 1920,
         "height": 1080,
         "decorations": false,

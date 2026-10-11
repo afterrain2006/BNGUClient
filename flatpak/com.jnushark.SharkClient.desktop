@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=SharkClient
-Comment=RoboMaster client and AI detection dashboard
-Exec=sharkclient
-Icon=com.jnushark.SharkClient
-Terminal=false
-Categories=Utility;Robotics;

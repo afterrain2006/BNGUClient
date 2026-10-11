@@ -148,7 +148,7 @@ pub fn get_bundle_root_dir() -> PathBuf {
 }
 
 pub fn get_cache_dir() -> PathBuf {
-    if let Ok(cache_dir) = std::env::var("SHARK_CACHE_DIR") {
+    if let Ok(cache_dir) = std::env::var("BNGUCLIENT_CACHE_DIR") {
         let path = PathBuf::from(cache_dir);
         if !path.as_os_str().is_empty() {
             return path;
@@ -159,10 +159,6 @@ pub fn get_cache_dir() -> PathBuf {
 
 pub fn get_webview_data_dir() -> PathBuf {
     get_cache_dir().join("WebView")
-}
-
-pub fn get_log_dir() -> PathBuf {
-    get_cache_dir().join("logs")
 }
 
 pub fn ensure_cache_dir() -> PathBuf {
@@ -382,22 +378,6 @@ pub async fn dashboard_config_check_panel_usage(
         }
     }
     Ok(serde_json::json!({ "success": true, "usedBy": used_by }))
-}
-
-#[tauri::command]
-pub async fn get_model_path(
-    app: tauri::AppHandle,
-    relative_path: String,
-) -> Result<Option<String>, String> {
-    let mut path = get_resource_dir(&app);
-    for part in relative_path.split('/') {
-        path.push(part);
-    }
-    if path.exists() {
-        Ok(Some(format!("app://{}", relative_path)))
-    } else {
-        Ok(None)
-    }
 }
 
 #[tauri::command]

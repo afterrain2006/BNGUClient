@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a minimal static FFmpeg (HEVC/H.264 decode + VAAPI/CUDA hwaccel)
-# for SharkClientRustVersion on Linux x64.
+# for BNGUClient on Linux x64.
 #
 # Output:
 #   - ffmpeg              -> resources/ffmpeg/ffmpeg              (CLI binary, optional)

@@ -37,7 +37,7 @@ type GraphicTemplateCategories = {
   fix: NamedContentFile[];
 };
 
-interface SharkClientApi {
+interface BnguClientApi {
   [key: string]: any;
   onMaximizedStateChanged?: (cb: (state: boolean) => void) => UnlistenFn;
   onMatchStatusChanged?: (cb: (status: import('@/components/Dashboard/types').MatchStatus) => void) => UnlistenFn;
@@ -69,7 +69,7 @@ interface SharkClientApi {
 
 declare global {
   interface Window {
-    api: SharkClientApi;
+    api: BnguClientApi;
   }
 }
 export {};

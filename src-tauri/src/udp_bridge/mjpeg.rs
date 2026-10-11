@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use tracing::warn;
 
-pub(super) const MJPEG_BOUNDARY: &str = "sharkframe";
+pub(super) const MJPEG_BOUNDARY: &str = "bnguclientframe";
 pub(super) const MJPEG_FALLBACK_QUALITY: u8 = 48;
 pub(super) const MJPEG_FALLBACK_MAX_FPS: u32 = 30;
 const MAX_MJPEG_CLIENTS: usize = 4;

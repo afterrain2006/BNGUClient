@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <HUDPanel id="module-status">
   <title>模块状态</title>
-  <description>显示相机、检测、通信、电源等模块的运行状态</description>
+  <description>显示视频、MQTT 连接及 UDP 图传帧率</description>
   
   <!-- 初始位置配置 -->
   <position>
@@ -30,10 +30,9 @@
   <content>
     <component>ModuleStatus</component>
     <fields>
-      <field name="camera" label="相机" type="status" />
-      <field name="detection" label="检测" type="status" toggleable="true" />
-      <field name="communication" label="通信" type="status" />
-      <field name="power" label="电源" type="percentage" />
+      <field name="camera" label="视频" type="status" />
+      <field name="communication" label="MQTT" type="status" />
+      <field name="fps" label="图传帧率" type="number" />
     </fields>
   </content>
 </HUDPanel>

@@ -133,7 +133,7 @@ fn main() {
 }
 
 /// Compile the C accessor shim (`src/ffmpeg_shim.c`) against the vendored
-/// FFmpeg headers and link it as a static lib named `shark_ffmpeg_shim`.
+/// FFmpeg headers and link it as a static lib named `bnguclient_ffmpeg_shim`.
 fn compile_ffmpeg_shim(target_os: &str) {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let platform_dir = match target_os {
@@ -162,7 +162,7 @@ fn compile_ffmpeg_shim(target_os: &str) {
         // FFmpeg headers expect inttypes/stdint that MSVC supports natively;
         // no extra defines needed.
     }
-    build.compile("shark_ffmpeg_shim");
+    build.compile("bnguclient_ffmpeg_shim");
     println!("cargo:rerun-if-changed=src/ffmpeg_shim.c");
 }
 

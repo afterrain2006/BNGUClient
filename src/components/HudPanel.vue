@@ -1,4 +1,3 @@
-<!-- filepath: e:\desktop\SharkClientVue\shark_client_vue\src\renderer\src\components\HudPanel.vue -->
 <script setup lang="ts">
 import { ref, computed, onUnmounted, reactive, onMounted, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'

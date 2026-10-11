@@ -2,6 +2,7 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Buffer } from 'buffer';
 import { encodeRm2026Command } from '@/rules/rm2026';
+import { version as clientVersion } from '../package.json';
 
 type CommandResult = {
   success: boolean;
@@ -243,7 +244,6 @@ const api: any = {
   getSetting: async (key: string) => await invoke('get_setting', { key }),
   saveSetting: async (key: string, value: any) => await invoke('save_setting', { key, value }),
   
-  getModelPath: async (relativePath: string) => `/${relativePath}`,
   readModelFile: async (relativePath: string) => {
     try {
         const res = await fetch(`/${relativePath}`);
@@ -265,7 +265,7 @@ const api: any = {
   syncSendDataProto: async (_blocks: any) => {},
   parseCustomData: async (_protoPath: string, _buffer: Uint8Array) => null,
   
-  getAppInfo: async () => ({ version: "2.0.0" }),
+  getAppInfo: async () => ({ name: 'BNGUClient', version: clientVersion }),
   getRobotTypes: async () => await invoke('get_robot_types'),
   getRobotConfig: async () => await invoke('get_robot_config'),
   getRobotConfigByName: async (name: string) => await invoke('get_robot_config_by_name', { name }),
@@ -352,62 +352,6 @@ const api: any = {
     try { await invoke('app_close'); } catch (err) { console.warn('[window] close failed:', err); }
   },
   onMaximizedStateChanged: () => { return () => {}; },
-  
-  shm: {
-    connect: async () => {
-      try {
-        return await invoke<boolean>('shm_connect');
-      } catch (err) {
-        console.error('[shm] connect failed:', err);
-        return false;
-      }
-    },
-    disconnect: async () => {
-      try {
-        return await invoke<boolean>('shm_disconnect');
-      } catch (err) {
-        console.error('[shm] disconnect failed:', err);
-        return false;
-      }
-    },
-    status: async () => {
-      try {
-        return await invoke('shm_status');
-      } catch {
-        return { connected: false, metrics: null };
-      }
-    },
-    /**
-     * Send a detection request to the external script. Rust upgrades image
-     * payloads to shared memory on Windows and uses the pipe as control IPC.
-     */
-    sendProtocolData: async (data: unknown) => {
-      return await invoke('shm_detect', { data });
-    },
-    detectLatestMjpeg: async (data: unknown) => {
-      return await invoke('shm_detect_latest_mjpeg', { data });
-    }
-  },
-
-  /**
-   * External detection script lifecycle.
-   */
-  pipeServer: {
-    downloadFile: async (_path: string) => ({ success: true }),
-    start: async (path = 'AI Server') => {
-      return await invoke('pipe_server_start', { path });
-    },
-    stop: async () => await invoke<boolean>('pipe_server_stop'),
-    getStatus: async () => await invoke('pipe_server_get_status'),
-    onStatusChanged: (cb: (status: string, message?: string) => void) => {
-      let unlisten: any;
-      listen('pipe-server-status', (event) => {
-        const payload = event.payload as { status?: unknown; message?: unknown };
-        cb(String(payload?.status ?? 'stopped'), String(payload?.message ?? ''));
-      }).then(u => unlisten = u);
-      return () => unlisten?.();
-    }
-  },
   
   udpStream: {
     getDecodeCapabilities: async () => await invoke('get_decode_capabilities'),
@@ -530,7 +474,6 @@ const api: any = {
         return () => unlisten?.();
     },
     onRobotStatus: () => { return () => {}; },
-    onDetectionList: () => { return () => {}; },
     onRadarData: () => { return () => {}; },
     onHeartbeat: () => { return () => {}; },
     startLocalBroker: async (port: number) => toCommandResult(await invoke('mqtt_start_local_broker', { port })),

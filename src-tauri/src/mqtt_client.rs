@@ -222,7 +222,7 @@ pub async fn mqtt_connect(
 
     let client_id = config.client_id.clone().unwrap_or_else(|| {
         format!(
-            "shark_client_{}",
+            "bnguclient_client_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

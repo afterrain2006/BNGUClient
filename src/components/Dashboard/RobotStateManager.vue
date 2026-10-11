@@ -77,14 +77,11 @@ interface Props {
   robotName?: string
   /** 队伍 */
   team?: 'red' | 'blue'
-  /** 是否启用模拟 */
-  enableSimulation?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   robotName: '',
-  team: 'red',
-  enableSimulation: false
+  team: 'red'
 })
 
 // ==================== MQTT Store ====================

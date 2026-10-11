@@ -1,4 +1,3 @@
-<!-- filepath: e:\desktop\SharkClientVue\shark_client_vue\src\renderer\src\components\ConfirmationDialog.vue -->
 <script setup lang="ts">
 defineProps({
   title: {

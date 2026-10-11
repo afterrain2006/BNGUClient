@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    shark_client_rust_version_lib::run()
+    bnguclient_lib::run()
 }

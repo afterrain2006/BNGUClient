@@ -42,7 +42,7 @@ Vue 状态断点建议放在 Rule、runner、Store 更新函数与 UI 投影处�
 在启动桌面客户端前设置，只影响当前 PowerShell 会话：
 
 ```powershell
-$env:SHARK_LOG = 'info,shark_client_rust_version_lib::udp_bridge=debug'
+$env:BNGUCLIENT_LOG = 'info,bnguclient_lib::udp_bridge=debug'
 $env:RUST_BACKTRACE = '1'
 npm run tauri -- dev
 ```
@@ -50,12 +50,12 @@ npm run tauri -- dev
 Linux 等价命令：
 
 ```bash
-SHARK_LOG=info,shark_client_rust_version_lib::udp_bridge=debug RUST_BACKTRACE=1 npm run tauri -- dev
+BNGUCLIENT_LOG=info,bnguclient_lib::udp_bridge=debug RUST_BACKTRACE=1 npm run tauri -- dev
 ```
 
-SHARK_LOG 优先，未设置时使用 RUST_LOG，默认 info。先限定模块，不要长期打开全局 trace 或每包日志影响延迟。panic 回溯、编译错误和 tracing 信息看启动终端；前端 Console 不能替代它。
+BNGUCLIENT_LOG 优先，未设置时使用 RUST_LOG，默认 info。先限定模块，不要长期打开全局 trace 或每包日志影响延迟。panic 回溯、编译错误和 tracing 信息看启动终端；前端 Console 不能替代它。
 
-前端 logStore 只保留最近 200 条 log/warn/error，非持久日志。Cache/logs 路径的存在不意味着所有 Rust 输出都会自动保存到文件；需要时保存终端输出并脱敏。
+前端 logStore 只保留最近 200 条 log/warn/error，非持久日志。Rust 日志输出到启动终端，不会自动写入 Cache/logs；需要时保存终端输出并脱敏。
 
 ### 2.3 只读状态检查
 
@@ -106,7 +106,7 @@ flowchart LR
 - 松开按键后键位是否归零；按住 Backspace、打开菜单或失焦后检查释放行为。
 - 断开重连时旧待发送输入是否取消，不将 UI 选择当发送身份。
 
-不要继续使用旧版 `shark.dashboard.roboControlDebug` localStorage 开关期待输出；发送链拆分后已无该旧日志功能。可在 controlSender/Rule 下断点或查看 Mock 端实收。
+发送链拆分后已无旧版键鼠 localStorage 调试开关。可在 controlSender/Rule 下断点或查看 Mock 端实收。
 
 MQTT 成功发布只表示传输层接受请求，不证明机器人收到、执行或安全停止。实机的输入映射和失联超时仍须与电控联调。
 
@@ -153,11 +153,10 @@ Test-NetConnection 检查 TCP，不能证明 UDP 3334 的视频内容有效。�
 | 3333 bind/address in use | Mock 与内置 Broker 不要同时占同一端口 |
 | 浏览器报 IPC/API 不可用 | 纯网页不是桌面客户端；用 tauri dev 或专用 UI 预览 |
 | 找不到 messages.proto | 检查是否克隆了正确仓库/完整目录；协议源已提交，不要删 prebuild 绕过 |
-| zip 无法解压 | 检查是否 LFS 指针；AI 可选，不阻碍基础联调 |
 | 改 XML/YAML 无效果 | 核对实际运行副本、资源解析路径和是否已重读/重启，不假设所有资源有 HMR |
 | 自定义状态或图片没解析 | parseCustomData 仍为 null，占位功能不是网络或依赖问题 |
 
-Cache 默认位于程序目录的 Cache，可由 SHARK_CACHE_DIR 覆盖，WebView 状态/设置可能跨启动保留。先备份并定位具体配置，别先删除整个 Cache；不建议为了一个显示问题重置全部配置。
+Cache 默认位于程序目录的 Cache，可由 BNGUCLIENT_CACHE_DIR 覆盖，WebView 状态/设置可能跨启动保留。先备份并定位具体配置，别先删除整个 Cache；不建议为了一个显示问题重置全部配置。
 
 ## 7. 自动检查和 GitHub CI
 

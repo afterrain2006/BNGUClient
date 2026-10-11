@@ -1,5 +1,5 @@
 
-# Build a minimal static ffmpeg.exe for SharkClientRustVersion.
+# Build a minimal static ffmpeg.exe for BNGUClient.
 #
 # Pipeline requirements (from src-tauri/src/video_decoder.rs):
 #   - HEVC + H.264 decode

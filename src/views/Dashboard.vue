@@ -14,11 +14,7 @@ import {
 import { storeToRefs } from 'pinia'
 import HudPanel from '@/components/HudPanel.vue'
 import VideoSourceManager from '@/components/Dashboard/VideoSourceManager.vue'
-import DetectionService from '@/components/Dashboard/DetectionService.vue'
 import RobotStateManager from '@/components/Dashboard/RobotStateManager.vue'
-import PerformanceOptimizer from '@/components/Dashboard/PerformanceOptimizer.vue'
-import ConfigPanels from '@/components/Dashboard/ConfigPanels.vue'
-import DetectionOverlay from '@/components/DetectionOverlay.vue'
 import CrosshairSettings, { type CrosshairConfig } from '@/components/CrosshairSettings.vue'
 import AmmoPurchaseMenu from '@/components/AmmoPurchaseMenu.vue'
 import RemoteAmmoPurchaseMenu from '@/components/RemoteAmmoPurchaseMenu.vue'
@@ -53,13 +49,10 @@ import { useConnectionStore } from '@/stores/connectionStore'
 import { panelRegistry } from '../store/panels' // 面板注册表，用于获取实时位置
 
 // 导入类型和常量
-import type { PipeServerStatus, PerformancePreset, UdpStats } from '@/components/Dashboard/types'
+import type { UdpStats } from '@/components/Dashboard/types'
 import {
   VIDEO_CONSTRAINTS,
-  MAX_MUZZLE_HEAT,
-  RING_RADIUS,
-  HEAT_SIMULATION_INTERVAL,
-  PERFORMANCE_PRESETS
+  RING_RADIUS
 } from '@/components/Dashboard/constants'
 
 // ==================== Pinia Store ====================
@@ -90,8 +83,6 @@ const {
   isDrawingMode,
   // 调试模式
   isDebugMode,
-  // 检测状态
-  detectionEnabled,
   // UDP 状态
   udpStreamStatus,
   udpStats,
@@ -101,46 +92,17 @@ const {
   useLocalBroker,
   localBrokerPort,
   localBrokerStatus,
-  // Pipe 服务器状态
-  pipeServerStatus,
   // 机器人状态
   robotTypes,
   selectedRobot,
   remainingAmmo,
   exchangeableAmmo,
-  // 性能状态
-  enableSimulation,
-  performancePreset,
-  // WebRTC 分发状态
-  webrtcDistributeEnabled,
-  webrtcSignalingStatus,
-  webrtcSignalingAddress,
-  webrtcConnectedClients,
-  // 全局配置
-  globalConfig
 } = storeToRefs(store)
 
 // 计算属性直接从 store 获取
 // 注意: 直接解构 computed 会失去响应性，需要通过包装保持响应式
 const { selectedTeam } = store
 
-// 需要响应式的 computed，通过包装保持响应性
-const encodingMethod = computed(() => store.encodingMethod)
-
-// 配置对象需要保持响应式（用于传递给子组件和 v-model 绑定）
-// 使用 computed 包装，在 script 中需要用 .value 访问
-const encodeConfig = computed({
-  get: () => store.encodeConfig,
-  set: (val) => {
-    store.encodeConfig = val
-  }
-})
-const detectionConfig = computed({
-  get: () => store.detectionConfig,
-  set: (val) => {
-    store.detectionConfig = val
-  }
-})
 const udpConfig = computed({
   get: () => store.udpConfig,
   set: (val) => {
@@ -363,14 +325,13 @@ const isMouseCaptured = ref(false)
 const MIN_ZOOM = 1.0 // 最小缩放（原始大小，不允许缩小）
 const MAX_ZOOM = 10.0 // 最大缩放 10 倍
 const ZOOM_STEP = 0.1 // 每次缩放步进，保留 1 位小数
-const VIDEO_ZOOM_STORAGE_KEY = 'shark.dashboard.videoZoom'
-const GLOBAL_HOTKEY_STORAGE_KEY = 'shark.dashboard.globalHotkeys'
-const LEGACY_VIDEO_ZOOM_HOTKEY_STORAGE_KEY = 'shark.dashboard.videoZoomHotkeys'
+const VIDEO_ZOOM_STORAGE_KEY = 'bnguclient.dashboard.videoZoom'
+const GLOBAL_HOTKEY_STORAGE_KEY = 'bnguclient.dashboard.globalHotkeys'
+const LEGACY_VIDEO_ZOOM_HOTKEY_STORAGE_KEY = 'bnguclient.dashboard.videoZoomHotkeys'
 
 type GlobalHotkeyAction =
   | 'toggleSettings'
   | 'exitHudEdit'
-  | 'toggleDetection'
   | 'crosshairSettings'
   | 'ammoPurchase'
   | 'remoteAmmoPurchase'
@@ -383,7 +344,6 @@ type GlobalHotkeys = Record<GlobalHotkeyAction, string>
 const DEFAULT_GLOBAL_HOTKEYS: GlobalHotkeys = {
   toggleSettings: 'KeyP',
   exitHudEdit: 'Escape',
-  toggleDetection: 'F6',
   crosshairSettings: 'F7',
   ammoPurchase: 'F8',
   remoteAmmoPurchase: 'KeyH',
@@ -393,7 +353,6 @@ const DEFAULT_GLOBAL_HOTKEYS: GlobalHotkeys = {
 }
 
 const LEGACY_DEFAULT_ROBOT_CONFLICT_HOTKEYS: Partial<GlobalHotkeys> = {
-  toggleDetection: 'KeyD',
   crosshairSettings: 'KeyE',
   ammoPurchase: 'KeyB'
 }
@@ -434,7 +393,6 @@ const GLOBAL_HOTKEY_GROUPS: Array<{
   {
     title: '战斗',
     actions: [
-      { action: 'toggleDetection', label: '检测开关', description: '启用或停止 AI 检测' },
       { action: 'ammoPurchase', label: '弹丸购买', description: '打开或关闭弹丸购买菜单' },
       { action: 'remoteAmmoPurchase', label: '远程补弹', description: '打开或关闭远程补弹菜单' }
     ]
@@ -546,35 +504,16 @@ const stopControlConnectionWatch = watch(
   { immediate: true, flush: 'sync' }
 )
 
-// 监听 Pipe 服务器状态变化
-if (window.api?.pipeServer?.onStatusChanged) {
-  window.api.pipeServer.onStatusChanged((status: string, message?: string) => {
-    console.log('[Dashboard] Pipe 服务器状态变化:', status, message ?? '')
-    store.setPipeServerStatus(status as PipeServerStatus)
-    if (status === 'error' && message) {
-      console.error('[Dashboard] Pipe 服务器错误:', message)
-    }
-  })
-}
-
 // 视频状态（本地 DOM 引用）
 const videoEl = ref<HTMLVideoElement | null>(null)
 const tabsContentEl = ref<HTMLDivElement | null>(null)
-const detectionServiceRef = ref<InstanceType<typeof DetectionService> | null>(null)
 const robotStateRef = ref<InstanceType<typeof RobotStateManager> | null>(null)
-const performanceOptimizerRef = ref<InstanceType<typeof PerformanceOptimizer> | null>(null)
-const configPanelsRef = ref<InstanceType<typeof ConfigPanels> | null>(null)
 const dashboardConfigRef = ref<InstanceType<typeof DashboardConfigManager> | null>(null)
 const robotActionHintRef = ref<InstanceType<typeof RobotActionHint> | null>(null)
 const cameraDevices = ref<MediaDeviceInfo[]>([])
 
-// WebRTC 分发连接管理（本地变量）
+// 本地摄像头流
 let localStream: MediaStream | null = null
-let rtcPeerConnections: Map<string, RTCPeerConnection> = new Map()
-
-// ==================== 目标检测相关 ====================
-// detections, detectionFrameSize, videoSize 现在从 Pinia store 获取
-// 推理引擎已内嵌到 Rust 二进制，无需监听外部 Python 子进程状态。
 
 // 子组件 video-connected 事件回调：更新父级状态
 function handleVideoConnected(connected: boolean): void {
@@ -589,16 +528,6 @@ function handleVideoConnected(connected: boolean): void {
   } else {
     cameraStatus.value = '未连接'
   }
-}
-
-// ==================== DetectionService 事件处理 ====================
-// 注意: 子组件现在直接同步状态到 Pinia store，以下处理函数仅用于日志记录
-
-/**
- * 处理通信状态变化事件（仅日志）
- */
-function handleCommunicationStatusChange(connected: boolean): void {
-  console.log('[Dashboard] 检测通信状态变化:', connected ? '已连接' : '已断开')
 }
 
 // ==================== RobotStateManager 事件处理 ====================
@@ -682,115 +611,6 @@ function handleRobotChange(robotName: string): void {
   console.log('[Dashboard] 机器人选择已更新:', robotName)
 }
 
-// ==================== PerformanceOptimizer 事件处理 ====================
-// 注意: 子组件现在直接同步状态到 Pinia store
-
-/**
- * 运行编码性能测试（委托给 PerformanceOptimizer 组件）
- */
-const runEncodingBenchmark = async (): Promise<void> => {
-  if (!performanceOptimizerRef.value) {
-    console.warn('[性能测试] PerformanceOptimizer 组件未就绪')
-    return
-  }
-  performanceOptimizerRef.value.runBenchmark()
-}
-
-// ==================== ConfigPanels 事件处理 ====================
-// 注意: 子组件现在直接同步状态到 Pinia store
-
-// ==================== 外置检测服务管理 ====================
-const DEFAULT_DETECTION_SCRIPT_PATH = 'AI Server'
-
-/**
- * 手动启动外置检测脚本。
- */
-const startPipeServer = async (): Promise<boolean> => {
-  try {
-    pipeServerStatus.value = 'starting'
-    const result = await window.api.pipeServer.start(DEFAULT_DETECTION_SCRIPT_PATH)
-    if (result?.success) {
-      pipeServerStatus.value = ((result as any).status as PipeServerStatus) ?? 'starting'
-      console.log('[Detector] 外置检测脚本启动中', result)
-      return true
-    }
-    pipeServerStatus.value = 'error'
-    console.error('[Detector] 启动失败:', (result as any)?.error)
-    return false
-  } catch (error) {
-    console.error('[Detector] 启动异常:', error)
-    pipeServerStatus.value = 'error'
-    return false
-  }
-}
-
-/**
- * 停止 Pipe 服务器
- */
-const stopPipeServer = async (): Promise<void> => {
-  if (!window.api?.pipeServer) return
-
-  try {
-    // 通过 DetectionService 组件断开 Pipe 连接（如果有）
-    if (detectionServiceRef.value) {
-      await detectionServiceRef.value.disconnectCommunication()
-    }
-
-    await window.api.pipeServer.stop()
-    pipeServerStatus.value = 'stopped'
-    console.log('[Pipe Server] 已停止')
-  } catch (error) {
-    console.error('[Pipe Server] 停止失败:', error)
-  }
-}
-
-/**
- * 应用性能预设
- * 更新 globalConfig 中的编码和检测配置
- */
-function applyPreset(preset: PerformancePreset): void {
-  const config = PERFORMANCE_PRESETS[preset]
-  performancePreset.value = preset
-  globalConfig.value.performancePreset = preset
-
-  // 应用编码配置到 globalConfig
-  globalConfig.value.encode = {
-    quality: config.encode.quality,
-    maxSize: config.encode.maxSize,
-    enableDownsample: config.encode.enableDownsample
-  }
-
-  // 应用检测配置到 globalConfig
-  globalConfig.value.detection = {
-    ...globalConfig.value.detection,
-    armorConf: config.detect.armorConf,
-    carConf: config.detect.carConf,
-    maxSize: config.detect.maxSize
-  }
-
-  console.log(`[Dashboard] 切换到预设: ${preset} - ${config.desc}`)
-}
-
-/**
- * 切换目标检测功能（委托给 DetectionService 组件）
- */
-async function toggleDetection(): Promise<void> {
-  if (!detectionEnabled.value && pipeServerStatus.value !== 'running') {
-    console.warn('[Dashboard] 请先手动启动外置检测服务')
-    return
-  }
-  // 切换父组件（Dashboard）的 detectionEnabled 状态，子组件通过 props.watch 响应
-  detectionEnabled.value = !detectionEnabled.value
-}
-
-/**
- * 停止检测（委托给 DetectionService 组件）
- */
-function stopDetection(): void {
-  // 停止检测：切换父级状态为 false，子组件会通过 props.watch 停止检测
-  detectionEnabled.value = false
-}
-
 // ==================== 摄像头设备管理 ====================
 /**
  * 加载并枚举摄像头设备
@@ -819,14 +639,16 @@ async function loadCameraDevices(): Promise<void> {
   }
 }
 
-// ==================== 枪口热量模拟 ====================
-const muzzleHeat = ref(0)
-let heatTimer: number | null = null
+// ==================== 真实遥测热量 ====================
 
 /**
  * 热量百分比 (0-1)
  */
-const heatPercent = computed(() => Math.max(0, Math.min(1, muzzleHeat.value / MAX_MUZZLE_HEAT)))
+const heatPercent = computed(() => {
+  const robot = telemetry.getRobot(telemetry.currentRobotId)
+  if (robot?.currentHeat === undefined || robot.maxHeat === undefined || robot.maxHeat <= 0) return 0
+  return Math.max(0, Math.min(1, robot.currentHeat / robot.maxHeat))
+})
 
 /**
  * 根据热量动态计算环形颜色 (绿 -> 红)
@@ -844,38 +666,13 @@ const ringColor = computed(() => {
  */
 const ringCircumference = 2 * Math.PI * RING_RADIUS
 
-/**
- * 启动热量模拟动画
- */
-function startHeatSimulation(): void {
-  if (heatTimer || !enableSimulation.value) return
-
-  const startTime = performance.now()
-  heatTimer = window.setInterval(() => {
-    const elapsedSeconds = (performance.now() - startTime) / 1000
-    // 正弦波模拟热量变化
-    muzzleHeat.value = ((Math.sin((elapsedSeconds * Math.PI) / 3) + 1) / 2) * MAX_MUZZLE_HEAT
-  }, HEAT_SIMULATION_INTERVAL)
-}
-
-/**
- * 停止热量模拟动画
- */
-function stopHeatSimulation(): void {
-  if (heatTimer) {
-    clearInterval(heatTimer)
-    heatTimer = null
-    muzzleHeat.value = 0
-  }
-}
-
-// ==================== WebRTC 控制 ====================
+// ==================== 摄像头采集 ====================
 /**
  * 获取媒体流（摄像头）
  */
 async function getMediaStream(): Promise<MediaStream> {
   if (videoSource.value !== 'camera') {
-    throw new Error('视频文件模式不支持 WebRTC')
+    throw new Error('仅摄像头模式支持设备采集')
   }
 
   videoStatus.value = '请求摄像头权限...'
@@ -911,11 +708,8 @@ async function getMediaStream(): Promise<MediaStream> {
  */
 function cleanup(): void {
   // 性能优化：清理时停止模拟
-  stopHeatSimulation()
   // 状态模拟由 RobotStateManager 组件内部管理
 
-  // 停止 WebRTC 分发
-  stopWebRTCDistribution()
 
   // 停止所有媒体轨道
   if (localStream) {
@@ -1993,7 +1787,7 @@ async function connect(): Promise<void> {
         return
       }
 
-      // 摄像头模式：使用 WebRTC
+      // 摄像头模式：直连 MediaStream
       await connectCamera()
     } catch (error) {
       console.error('[Dashboard] 连接失败:', error)
@@ -2037,93 +1831,7 @@ async function connectCamera(): Promise<void> {
     wasConnected.value = true
     console.log('[Dashboard] 摄像头直连成功')
 
-    // 性能优化：视频连接后可选启动模拟（如果用户启用）
-    if (enableSimulation.value) {
-      startHeatSimulation()
-      // 状态模拟由 RobotStateManager 组件内部管理
-    }
 
-    // 如果启用了 WebRTC 分发，则启动分发（仅用于远程客户端）
-    if (webrtcDistributeEnabled.value && webrtcSignalingStatus.value !== 'running') {
-      await startWebRTCDistribution()
-    }
-  }
-}
-
-// ==================== WebRTC 网络分发 ====================
-/**
- * 启动 WebRTC 网络分发
- * 创建信令服务器，允许其他设备连接观看视频流
- */
-async function startWebRTCDistribution(): Promise<void> {
-  try {
-    webrtcSignalingStatus.value = 'starting'
-
-    // 通过 IPC 启动信令服务器
-    const result = await window.api?.startSignalingServer?.()
-    if (result?.success) {
-      webrtcSignalingStatus.value = 'running'
-      webrtcSignalingAddress.value = result.address || ''
-      console.log('[WebRTC分发] 信令服务器已启动:', webrtcSignalingAddress.value)
-    } else {
-      webrtcSignalingStatus.value = 'error'
-      console.error('[WebRTC分发] 启动失败:', result?.error)
-    }
-  } catch (error) {
-    webrtcSignalingStatus.value = 'error'
-    console.error('[WebRTC分发] 启动异常:', error)
-  }
-}
-
-/**
- * 停止 WebRTC 网络分发
- */
-async function stopWebRTCDistribution(): Promise<void> {
-  // 关闭所有对等连接
-  rtcPeerConnections.forEach((pc, clientId) => {
-    console.log('[WebRTC分发] 关闭客户端连接:', clientId)
-    pc.close()
-  })
-  rtcPeerConnections.clear()
-  webrtcConnectedClients.value = 0
-
-  // 停止信令服务器
-  if (webrtcSignalingStatus.value === 'running') {
-    try {
-      await window.api?.stopSignalingServer?.()
-    } catch (e) {
-      console.warn('[WebRTC分发] 停止信令服务器失败:', e)
-    }
-  }
-
-  webrtcSignalingStatus.value = 'stopped'
-  webrtcSignalingAddress.value = ''
-  console.log('[WebRTC分发] 已停止')
-}
-
-/**
- * 切换 WebRTC 分发开关
- */
-async function toggleWebRTCDistribution(): Promise<void> {
-  if (webrtcDistributeEnabled.value) {
-    // 启用时立即启动信令服务器
-    await startWebRTCDistribution()
-  } else {
-    await stopWebRTCDistribution()
-  }
-}
-
-/**
- * 复制信令服务器地址到剪贴板
- */
-async function copySignalingAddress(): Promise<void> {
-  if (!webrtcSignalingAddress.value) return
-
-  try {
-    await navigator.clipboard.writeText(webrtcSignalingAddress.value)
-    console.log('[WebRTC分发] 地址已复制:', webrtcSignalingAddress.value)
-  } catch (error) {
-    console.error('[WebRTC分发] 复制失败:', error)
   }
 }
 
@@ -2158,9 +1866,6 @@ function runGlobalHotkeyAction(action: GlobalHotkeyAction, event?: KeyboardEvent
       } else {
         return
       }
-      break
-    case 'toggleDetection':
-      toggleDetection()
       break
     case 'crosshairSettings':
       isCrosshairSettingsVisible.value = !isCrosshairSettingsVisible.value
@@ -2535,24 +2240,12 @@ let mqttBrokerStatusCleanup: (() => void) | null = null
 onMounted(async () => {
   console.log('[Dashboard] 组件已挂载')
 
-  // GPU 编码支持检查由 PerformanceOptimizer 组件自动处理
-  // 子组件会在 onMounted 中直接同步状态到 Pinia store
-
   // 加载 HUD 模板并初始化组件配置
   await hudTemplatesStore.loadTemplates()
 
   // 等待 DOM 更新后加载各个面板的组件配置
   await nextTick()
   loadPanelWidgets()
-
-  // 外置检测服务默认不随客户端启动，这里只同步现有脚本状态。
-  try {
-    const pipeStatus = await window.api.pipeServer.getStatus()
-    const status = pipeStatus?.running ? 'running' : 'stopped'
-    pipeServerStatus.value = status
-  } catch {
-    pipeServerStatus.value = 'stopped'
-  }
 
   try {
 
@@ -2684,8 +2377,6 @@ onUnmounted(() => {
 
   // 清理资源
   cleanup()
-  stopHeatSimulation()
-  stopDetection()
 })
 
 onActivated(() => {
@@ -3047,29 +2738,6 @@ const handlePlaceGraphicTemplate = (payload: {
 
 <template>
   <div class="dashboard-root">
-    <!-- 检测服务组件（内部管理检测通信，状态直接同步到 Pinia store） -->
-    <DetectionService
-      ref="detectionServiceRef"
-      :video-source="videoSource"
-      :video-element="videoEl"
-      :source-canvas="udpCanvasEl"
-      :source-canvas-active="udpDirectCanvasActive && !udpBackendMjpegActive"
-      :source-image="udpMjpegImageEl"
-      :source-image-active="udpBackendMjpegActive"
-      :detection-config="detectionConfig"
-      :encode-config="encodeConfig"
-      :enabled="detectionEnabled"
-      style="display: none"
-      @communication-status-change="handleCommunicationStatusChange"
-    />
-
-    <!-- 性能优化组件（GPU编码、基准测试，状态直接同步到 Pinia store） -->
-    <PerformanceOptimizer
-      ref="performanceOptimizerRef"
-      :video-element="videoEl"
-      style="display: none"
-    />
-
     <main class="video-stream-area">
       <video
         v-show="!udpDirectCanvasActive && !udpBackendMjpegActive"
@@ -3137,8 +2805,6 @@ const handlePlaceGraphicTemplate = (payload: {
         ></div>
       </Transition>
 
-      <!-- 目标检测覆盖层 -->
-      <DetectionOverlay />
 
       <!-- 全局绘图层 -->
       <DrawingLayer
@@ -3223,7 +2889,6 @@ const handlePlaceGraphicTemplate = (payload: {
 
       <div class="hint">
         按 <kbd>{{ formatHotkey(globalHotkeys.toggleSettings) }}</kbd> 打开设置 | 按
-        <kbd>{{ formatHotkey(globalHotkeys.toggleDetection) }}</kbd> 切换检测 | 按
         <kbd>{{ formatHotkey(globalHotkeys.crosshairSettings) }}</kbd> 准星设置 | 按
         <kbd>{{ formatHotkey(globalHotkeys.ammoPurchase) }}</kbd> 弹丸购买 | 按
         <kbd>{{ formatHotkey(globalHotkeys.remoteAmmoPurchase) }}</kbd> 远程补弹
@@ -3316,7 +2981,6 @@ const handlePlaceGraphicTemplate = (payload: {
               ref="robotStateRef"
               :robot-name="selectedRobot"
               :team="selectedTeam || 'red'"
-              :enable-simulation="enableSimulation"
               v-bind="template.content.props"
               @config-loaded="handleRobotConfigLoaded"
             />
@@ -4043,311 +3707,8 @@ const handlePlaceGraphicTemplate = (payload: {
                     <polyline points="9 18 15 12 9 6"></polyline>
                   </svg>
                 </button>
-                <button class="action-card" @click="runEncodingBenchmark">
-                  <div class="action-icon">
-                    <svg
-                      width="24"
-                      height="24"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
-                    </svg>
-                  </div>
-                  <div class="action-content">
-                    <div class="action-title">编码性能测试</div>
-                    <div class="action-desc">比较GPU与CPU JPEG编码性能</div>
-                  </div>
-                  <svg
-                    class="action-arrow"
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <polyline points="9 18 15 12 9 6"></polyline>
-                  </svg>
-                </button>
               </div>
 
-              <!-- WebRTC 网络分发 -->
-              <div class="panel-section">
-                <h4 class="section-title">
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                    <circle cx="9" cy="7" r="4"></circle>
-                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-                  </svg>
-                  WebRTC 网络分发
-                </h4>
-
-                <div class="toggle-option">
-                  <label class="toggle-label">
-                    <input
-                      type="checkbox"
-                      v-model="webrtcDistributeEnabled"
-                      class="toggle-input"
-                      @change="toggleWebRTCDistribution"
-                    />
-                    <span class="toggle-switch"></span>
-                    <span class="toggle-text">启用 WebRTC 分发</span>
-                  </label>
-                  <div class="slider-hint">允许其他设备通过网络观看视频流</div>
-                </div>
-
-                <!-- WebRTC 分发状态 (仅在启用时显示) -->
-                <div v-if="webrtcDistributeEnabled" class="webrtc-distribute-status">
-                  <div class="server-status-row">
-                    <span class="status-label">信令服务器:</span>
-                    <span
-                      class="status-badge"
-                      :class="{
-                        running: webrtcSignalingStatus === 'running',
-                        starting: webrtcSignalingStatus === 'starting',
-                        stopped: webrtcSignalingStatus === 'stopped',
-                        error: webrtcSignalingStatus === 'error'
-                      }"
-                    >
-                      {{
-                        webrtcSignalingStatus === 'running'
-                          ? '运行中'
-                          : webrtcSignalingStatus === 'starting'
-                            ? '启动中...'
-                            : webrtcSignalingStatus === 'error'
-                              ? '错误'
-                              : '已停止'
-                      }}
-                    </span>
-                  </div>
-
-                  <!-- 信令地址显示 -->
-                  <div v-if="webrtcSignalingAddress" class="signaling-address">
-                    <span class="address-label">连接地址:</span>
-                    <code class="address-value">{{ webrtcSignalingAddress }}</code>
-                    <button class="copy-btn" title="复制地址" @click="copySignalingAddress">
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                      >
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                      </svg>
-                    </button>
-                  </div>
-
-                  <!-- 已连接客户端数 -->
-                  <div class="connected-clients">
-                    <span class="clients-label">已连接客户端:</span>
-                    <span class="clients-count">{{ webrtcConnectedClients }}</span>
-                  </div>
-                </div>
-
-                <div class="slider-hint">
-                  WebRTC 分发可让其他设备（手机、平板等）通过浏览器观看实时视频流
-                </div>
-              </div>
-
-              <!-- 性能优化：HUD 模拟开关 -->
-              <div class="panel-section">
-                <h4 class="section-title">
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
-                  </svg>
-                  性能优化
-                </h4>
-
-                <div class="toggle-option">
-                  <label class="toggle-label">
-                    <input
-                      type="checkbox"
-                      v-model="enableSimulation"
-                      class="toggle-input"
-                      @change="
-                        () => {
-                          if (enableSimulation) {
-                            startHeatSimulation()
-                            // 状态模拟由 RobotStateManager 组件根据 enableSimulation prop 自动控制
-                          } else {
-                            stopHeatSimulation()
-                          }
-                        }
-                      "
-                    />
-                    <span class="toggle-switch"></span>
-                    <span class="toggle-text">启用 HUD 动态模拟</span>
-                  </label>
-                  <div class="slider-hint">
-                    包括热量动画和状态模拟，关闭可大幅减少空闲时 CPU 占用
-                  </div>
-                </div>
-              </div>
-
-              <div class="panel-section">
-                <h4 class="section-title">
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-                  </svg>
-                  性能预设
-                </h4>
-
-                <div class="preset-buttons">
-                  <button
-                    v-for="(config, key) in PERFORMANCE_PRESETS"
-                    :key="key"
-                    class="preset-btn"
-                    :class="{ active: performancePreset === key }"
-                    @click="applyPreset(key as PerformancePreset)"
-                  >
-                    <span class="preset-name">{{
-                      key === 'quality'
-                        ? '高质量'
-                        : key === 'balanced'
-                          ? '平衡'
-                          : key === 'performance'
-                            ? '高性能'
-                            : '极速'
-                    }}</span>
-                    <span class="preset-fps">{{ config.desc.match(/\(.*\)/)?.[0] || '' }}</span>
-                  </button>
-                </div>
-                <div class="slider-hint" style="margin-top: 8px">
-                  极速模式使用480p+低质量压缩，可达100+ FPS（需TensorRT）
-                </div>
-              </div>
-
-              <div class="panel-section">
-                <h4 class="section-title">
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-                    <path d="M2 17l10 5 10-5M2 12l10 5 10-5"></path>
-                  </svg>
-                  AI检测参数
-                </h4>
-
-                <div class="toggle-option">
-                  <label class="toggle-label">
-                    <input
-                      type="checkbox"
-                      v-model="detectionConfig.showBoxes"
-                      class="toggle-input"
-                    />
-                    <span class="toggle-switch"></span>
-                    <span class="toggle-text">显示检测框</span>
-                  </label>
-                  <div class="slider-hint">关闭后仅显示车辆血条，不绘制原始目标框和标签</div>
-                </div>
-
-                <div class="slider-group">
-                  <label class="slider-label">
-                    <span class="label-text">装甲板置信度</span>
-                    <span class="label-value">{{ detectionConfig.armorConf.toFixed(2) }}</span>
-                  </label>
-                  <input
-                    type="range"
-                    v-model.number="detectionConfig.armorConf"
-                    min="0.1"
-                    max="0.9"
-                    step="0.05"
-                    class="slider"
-                  />
-                  <div class="slider-hint">值越低检测越灵敏，但可能增加误报</div>
-                </div>
-
-                <div class="slider-group">
-                  <label class="slider-label">
-                    <span class="label-text">车辆置信度</span>
-                    <span class="label-value">{{ detectionConfig.carConf.toFixed(2) }}</span>
-                  </label>
-                  <input
-                    type="range"
-                    v-model.number="detectionConfig.carConf"
-                    min="0.1"
-                    max="0.9"
-                    step="0.05"
-                    class="slider"
-                  />
-                  <div class="slider-hint">车辆检测的置信度阈值</div>
-                </div>
-
-                <div class="slider-group">
-                  <label class="slider-label">
-                    <span class="label-text">NMS IoU阈值</span>
-                    <span class="label-value">{{ detectionConfig.iouThreshold.toFixed(2) }}</span>
-                  </label>
-                  <input
-                    type="range"
-                    v-model.number="detectionConfig.iouThreshold"
-                    min="0.3"
-                    max="0.7"
-                    step="0.05"
-                    class="slider"
-                  />
-                  <div class="slider-hint">非极大值抑制阈值，控制重叠框过滤</div>
-                </div>
-
-                <div class="slider-group">
-                  <label class="slider-label">
-                    <span class="label-text">最大分辨率</span>
-                    <span class="label-value">{{ detectionConfig.maxSize }}px</span>
-                  </label>
-                  <input
-                    type="range"
-                    v-model.number="detectionConfig.maxSize"
-                    min="640"
-                    max="1920"
-                    step="160"
-                    class="slider"
-                  />
-                  <div class="slider-hint">服务器端降采样，降低可提升性能</div>
-                </div>
-              </div>
-
-              <!-- 配置面板组件：外置检测服务 + 图像编码配置（状态直接同步到 Pinia store） -->
-              <ConfigPanels
-                ref="configPanelsRef"
-                :default-encode-config="encodeConfig"
-                :pipe-server-status="pipeServerStatus"
-                :encoding-method="encodingMethod"
-                @start-pipe-server="startPipeServer"
-                @stop-pipe-server="stopPipeServer"
-              />
             </div>
           </div>
 
@@ -5716,136 +5077,6 @@ const handlePlaceGraphicTemplate = (payload: {
 .encode-status .status-badge.pipe {
   background: rgba(33, 150, 243, 0.2);
   color: #2196f3;
-}
-
-/* 性能预设按钮 */
-.preset-buttons {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-}
-
-.preset-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 10px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  cursor: pointer;
-  transition:
-    background 0.2s,
-    border-color 0.2s;
-}
-
-.preset-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.25);
-}
-
-.preset-btn.active {
-  background: rgba(102, 187, 106, 0.15);
-  border-color: rgba(102, 187, 106, 0.5);
-}
-
-.preset-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.preset-btn.active .preset-name {
-  color: #66bb6a;
-}
-
-.preset-fps {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
-  margin-top: 2px;
-}
-
-.preset-btn.active .preset-fps {
-  color: rgba(102, 187, 106, 0.8);
-}
-
-/* browse-btn:active moved to assets/main.css */
-
-/* 外置检测服务和编码配置样式已迁移到 ConfigPanels.vue */
-
-/* WebRTC 分发状态样式 */
-.webrtc-distribute-status {
-  margin-top: 12px;
-  padding: 12px;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-}
-
-.signaling-address {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 10px 0;
-  padding: 8px 12px;
-  background: rgba(96, 165, 250, 0.1);
-  border-radius: 6px;
-}
-
-.address-label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.address-value {
-  flex: 1;
-  font-size: 13px;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-  color: #60a5fa;
-  background: transparent;
-  border: none;
-  word-break: break-all;
-}
-
-.copy-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  color: rgba(255, 255, 255, 0.7);
-  cursor: pointer;
-  transition:
-    background 0.2s,
-    color 0.2s;
-}
-
-.copy-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-}
-
-.connected-clients {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-}
-
-.clients-label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.clients-count {
-  font-size: 14px;
-  font-weight: 600;
-  color: #34d399;
-  padding: 2px 10px;
-  background: rgba(52, 211, 153, 0.15);
-  border-radius: 12px;
 }
 
 /* UDP 图传设置样式 */

@@ -72,7 +72,7 @@ impl YuvFrame {
         let u_plane = &self.data[w * h..w * h + uv_size];
         let v_plane = &self.data[w * h + uv_size..];
         let max_height = *MJPEG_MAX_HEIGHT.get_or_init(|| {
-            std::env::var("SHARK_MJPEG_MAX_HEIGHT")
+            std::env::var("BNGUCLIENT_MJPEG_MAX_HEIGHT")
                 .ok()
                 .and_then(|value| {
                     let value = value.trim().to_ascii_lowercase();
