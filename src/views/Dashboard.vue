@@ -20,6 +20,7 @@ import AmmoPurchaseMenu from '@/components/AmmoPurchaseMenu.vue'
 import RemoteAmmoPurchaseMenu from '@/components/RemoteAmmoPurchaseMenu.vue'
 import RoboControl from '@/components/RoboControl.vue'
 import { neutralOperatorInput, type OperatorInput } from '@/contracts/OperatorInput'
+import CockpitOverlay from '@/components/CockpitOverlay.vue'
 import { createClientControlOutput } from '@/output/clientControlOutput'
 import { useFreshnessClock } from '@/composables/useFreshnessClock'
 import RobotActionHint from '@/components/RobotActionHint.vue'
@@ -56,6 +57,13 @@ import {
 } from '@/components/Dashboard/constants'
 
 // ==================== Pinia Store ====================
+const props = withDefaults(defineProps<{
+  interactionBlocked?: boolean
+  focusMode?: boolean
+  workbenchMode?: boolean
+  customHudMode?: boolean
+}>(), { interactionBlocked: false, focusMode: false, workbenchMode: false, customHudMode: false })
+
 const store = useDashboardStore()
 const telemetry = useTelemetryView()
 const robotSelection = useRobotSelectionStore()
@@ -308,6 +316,7 @@ const isLowHealthCritical = computed(
  */
 const isAnyMenuOpen = computed(
   () =>
+    props.interactionBlocked ||
     isSettingsVisible.value ||
     isCrosshairSettingsVisible.value ||
     isAmmoPurchaseVisible.value ||
@@ -320,6 +329,37 @@ const isAnyMenuOpen = computed(
 
 // 鼠标捕获状态
 const isMouseCaptured = ref(false)
+const controlArmed = ref(false)
+const roboControlRef = ref<InstanceType<typeof RoboControl> | null>(null)
+
+function releaseControl(): void {
+  controlArmed.value = false
+  roboControlRef.value?.exitCapture()
+}
+
+function openSettings(tab: 'video' | 'network' | 'robot' | 'display'): void {
+  releaseControl()
+  activeTab.value = tab
+  isSettingsVisible.value = true
+}
+
+function dismissOverlay(): boolean {
+  if (recordingHotkeyAction.value) { recordingHotkeyAction.value = null; return true }
+  if (renameModal.visible) { renameModal.visible = false; return true }
+  if (contextMenu.value.visible) { closeContextMenu(); return true }
+  if (robotActionHintRef.value?.dismissOverlay()) return true
+  for (const visible of [isCrosshairSettingsVisible, isAmmoPurchaseVisible, isRemoteAmmoPurchaseVisible, isSettingsVisible]) {
+    if (visible.value) { visible.value = false; return true }
+  }
+  if (isDrawingMode.value) { store.setDrawingMode(false); return true }
+  if (isHudInteractive.value && !props.workbenchMode) { isHudInteractive.value = false; return true }
+  return false
+}
+
+watch(() => props.workbenchMode, () => releaseControl(), { flush: 'sync' })
+watch(() => [connectionStore.connected, connectionStore.activeClientId], () => releaseControl(), { flush: 'sync' })
+
+defineExpose({ releaseControl, openSettings, dismissOverlay })
 
 // 视频缩放状态
 const MIN_ZOOM = 1.0 // 最小缩放（原始大小，不允许缩小）
@@ -1842,6 +1882,7 @@ async function connectCamera(): Promise<void> {
 function handleKeyDown(event: KeyboardEvent): void {
   // 如果正在输入或模态框打开，忽略快捷键
   if (
+    props.interactionBlocked ||
     renameModal.visible ||
     event.target instanceof HTMLInputElement ||
     event.target instanceof HTMLTextAreaElement
@@ -2352,6 +2393,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('blur', releaseControl)
   stopControlConnectionWatch()
   controlOutput.sender.dispose()
   console.log('[Dashboard] 组件卸载中...')
@@ -2394,6 +2436,8 @@ onActivated(() => {
 
   // 性能优化：不自动启动模拟，由用户或视频连接触发
 })
+
+onMounted(() => window.addEventListener('blur', releaseControl))
 
 onDeactivated(() => {
   console.log('[Dashboard] 组件失活')
@@ -2734,6 +2778,9 @@ const handlePlaceGraphicTemplate = (payload: {
     }
   }
 }
+
+// Register after all child/menu refs have been initialized.
+watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
 </script>
 
 <template>
@@ -2814,10 +2861,19 @@ const handlePlaceGraphicTemplate = (payload: {
         @close="store.setDrawingMode(false)"
       />
 
-      <div v-if="videoStatus" class="video-status-overlay">{{ videoStatus }}</div>
+      <div v-if="!wasConnected" class="cockpit-standby">
+        <span class="standby-reticle">+</span>
+        <span class="standby-eyebrow">VIDEO CHANNEL / BNGUCLIENT</span>
+        <h1>等待图传接入</h1>
+        <p>{{ isConnecting ? videoStatus : '配置视频来源，接入画面后开始操作。' }}</p>
+        <button :disabled="isConnecting" @click="openSettings('network')">{{ isConnecting ? '正在连接…' : '配置图传与连接' }}</button>
+        <small>未接入时不显示模拟画面或随机状态</small>
+      </div>
+      <div v-else-if="videoStatus" class="video-status-overlay">{{ videoStatus }}</div>
 
       <!-- 动态准星（带环形热量进度） -->
       <div
+        v-if="wasConnected || props.workbenchMode || isHudInteractive"
         class="crosshair"
         :style="{
           '--crosshair-color': crosshairConfig.color,
@@ -2887,7 +2943,7 @@ const handlePlaceGraphicTemplate = (payload: {
         </div>
       </div>
 
-      <div class="hint">
+      <div v-if="props.workbenchMode || isHudInteractive" class="hint">
         按 <kbd>{{ formatHotkey(globalHotkeys.toggleSettings) }}</kbd> 打开设置 | 按
         <kbd>{{ formatHotkey(globalHotkeys.crosshairSettings) }}</kbd> 准星设置 | 按
         <kbd>{{ formatHotkey(globalHotkeys.ammoPurchase) }}</kbd> 弹丸购买 | 按
@@ -2899,7 +2955,7 @@ const handlePlaceGraphicTemplate = (payload: {
     <div
       class="hud-layer"
       :class="{ interactive: isHudInteractive }"
-      v-show="!isDrawingMode"
+      v-show="!isDrawingMode && !props.focusMode && (props.workbenchMode || isHudInteractive || props.customHudMode)"
       @contextmenu="handleHudContextMenu"
     >
       <!-- HUD 编辑模式指示器 -->
@@ -3817,20 +3873,41 @@ const handlePlaceGraphicTemplate = (payload: {
     />
 
     <!-- 机器人操控组件 -->
+    <CockpitOverlay v-if="!props.customHudMode && !props.workbenchMode && !isHudInteractive && !isDrawingMode" :focus-mode="props.focusMode" />
+    <div v-if="!props.interactionBlocked && !isAnyMenuOpen && !isHudInteractive && !isDrawingMode" class="cockpit-control" :class="{ captured: isMouseCaptured }">
+      <button :disabled="!connectionStore.connected || isMouseCaptured" @click="controlArmed = true">{{ isMouseCaptured ? '键鼠控制已启用' : '启用键鼠控制' }}</button>
+      <span>{{ isMouseCaptured ? 'Esc 菜单 / 按住 Backspace 临时释放' : connectionStore.connected ? '返回视野后需手动启用' : '请先建立 MQTT 连接' }}</span>
+    </div>
     <RoboControl
+      ref="roboControlRef"
       :input-policy="controlOutput.rule.inputPolicy"
-      :enabled="!isAnyMenuOpen && connectionStore.connected"
+      :enabled="controlArmed && !isAnyMenuOpen && connectionStore.connected && !isDrawingMode"
       :hud-edit-mode="isHudInteractive"
       @control-frame="handleRoboControlFrame"
       @capture-change="handleCaptureChange"
     />
 
     <!-- K 键机器人特殊操作提示 -->
-    <RobotActionHint ref="robotActionHintRef" @action="handleRobotAction" />
+    <RobotActionHint ref="robotActionHintRef" :enabled="!props.interactionBlocked && connectionStore.connected && !isSettingsVisible && !isCrosshairSettingsVisible && !isHudInteractive && (controlArmed || Boolean(robotActionHintRef?.isAssemblyMenuOpen) || Boolean(robotActionHintRef?.isDartTargeting))" @action="handleRobotAction" />
   </div>
 </template>
 
 <style scoped>
+.cockpit-standby { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; color: #a3c1cd; background: radial-gradient(ellipse at 50% 45%, #203740, #0b1820 65%); }
+.standby-reticle { display: grid; place-items: center; width: 70px; height: 70px; border: 1px solid #91b7c44d; border-radius: 50%; font: 34px var(--font-tech-mono); margin-bottom: 10px; }
+.standby-eyebrow { font: 10px var(--font-tech-mono); letter-spacing: .16em; color: #7399ab; }
+.cockpit-standby h1 { font-size: 26px; font-weight: 400; letter-spacing: .14em; }
+.cockpit-standby p { font-size: 12px; color: #8ba8b5; max-width: 70%; text-align: center; }
+.cockpit-standby button, .cockpit-control button { padding: 10px 18px; border: 1px solid #b1dfe580; border-radius: 3px; background: #b1dfe5; color: #142a35; font-size: 12px; cursor: pointer; }
+.cockpit-standby button:hover, .cockpit-control button:hover:not(:disabled) { background: #d0f0f4; }
+.cockpit-standby small { color: #657f8c; font-size: 10px; margin-top: 8px; }
+.cockpit-control { position: absolute; z-index: 70; bottom: 52px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; flex-direction: column; gap: 8px; font-size: 10px; color: #8ea9b5; }
+.cockpit-control button:disabled { cursor: default; color: #81959c; background: #0e1c24cc; border-color: #385460; }
+.cockpit-control.captured { pointer-events: none; }
+.cockpit-control.captured button { color: #b7dabb; }
+.cockpit-control button:focus-visible, .cockpit-standby button:focus-visible { outline: 2px solid #d0f0f4; outline-offset: 4px; }
+@media (max-width: 700px) { .cockpit-control { bottom: 12px; } .cockpit-control span { display: none; } .cockpit-standby { padding-bottom: 160px; } }
+
 .dashboard-root {
   position: relative;
   width: 100%;

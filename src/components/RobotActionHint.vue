@@ -10,6 +10,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useTelemetryView } from '@/composables/useTelemetryView'
 
+const props = withDefaults(defineProps<{ enabled?: boolean }>(), { enabled: true })
+
 const telemetry = useTelemetryView()
 
 const emit = defineEmits<{
@@ -178,6 +180,7 @@ function selectDifficulty(difficulty: 1 | 2 | 3 | 4): void {
 
 // 键盘事件处理
 function handleKeyDown(event: KeyboardEvent): void {
+  if (!props.enabled || event.repeat) return
   // 如果在输入框中，忽略
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
     return
@@ -211,7 +214,18 @@ onUnmounted(() => {
 })
 
 // 暴露方法
+function dismissOverlay(): boolean {
+  if (isAssemblyMenuOpen.value) { isAssemblyMenuOpen.value = false; return true }
+  if (isDartTargeting.value) {
+    isDartTargeting.value = false
+    emit('action', 'drone-dart-open', { open: false })
+    return true
+  }
+  return false
+}
+
 defineExpose({
+  dismissOverlay,
   isDeployed,
   isAssemblyMenuOpen,
   isAirSupporting,
@@ -223,7 +237,7 @@ defineExpose({
 <template>
   <!-- K 键功能提示 (底部) -->
   <Transition name="slide-up">
-    <div v-if="showKKeyHint" class="robot-action-hint">
+    <div v-if="props.enabled && showKKeyHint" class="robot-action-hint">
       <div class="action-badge" :class="robotTypeName">
         <span class="key-hint"> 按 <kbd>K</kbd> {{ kKeyDescription }} </span>
 

@@ -153,7 +153,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import Versions from '@/components/Versions.vue'
 import ConfirmationDialog from '@/components/ConfirmationDialog.vue'
@@ -163,17 +163,14 @@ const dashboardStore = useDashboardStore()
 const { isDebugMode } = storeToRefs(dashboardStore)
 
 const isExitDialogVisible = ref(false)
-const isF11Enabled = ref(false)
 const F11_STORAGE_KEY = 'bnguclient.f11Enabled'
+const isF11Enabled = ref(localStorage.getItem(F11_STORAGE_KEY) !== '0')
 
-onMounted(() => {
-  try {
-    const saved = localStorage.getItem(F11_STORAGE_KEY)
-    isF11Enabled.value = saved === null ? true : saved === '1'
-  } catch {
-    isF11Enabled.value = true
-  }
-})
+defineExpose({ dismissOverlay() {
+  if (!isExitDialogVisible.value) return false
+  isExitDialogVisible.value = false
+  return true
+} })
 
 // 监听 F11 状态变化，持久化 + 同步到主进程
 watch(
@@ -422,5 +419,10 @@ const handleExitCancel = (): void => {
     padding-right: 32px;
   }
 
+}
+@media (max-width: 500px) {
+  .settings-header, .settings-container { padding: 20px 16px; }
+  .settings-section { padding: 16px; border-radius: 6px; }
+  .section-header { gap: 10px; }
 }
 </style>

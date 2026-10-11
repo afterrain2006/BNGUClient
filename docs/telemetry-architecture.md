@@ -76,6 +76,19 @@ RM2026's public codec without adding ControlIntent or electrical-control actions
 
 ## Operator input and outgoing control
 
+`App.vue` keeps Dashboard mounted while the native Esc dialog switches tool pages.
+Tool views have separate KeepAlive keys; they read stores and never decode MQTT.
+Opening the dialog synchronously calls Dashboard's releaseControl before focus moves;
+the background cockpit becomes inert. Explicit arming is required after menus,
+window blur, disconnect/reconnect, identity changes and HUD editing. Release still
+uses the existing neutral OperatorInput/sender path, not a new control encoding.
+
+`CockpitOverlay.vue` is a compact read-only projection. The old customizable HUD
+remains available in the workbench without rewriting saved layouts. Telemetry's
+old random robot simulation is replaced by real state, bounded health samples and
+a JSON snapshot export (not packet recording/replay). No reference-project legacy
+decoder/store is brought into this application.
+
 `RoboControl.vue` captures browser key codes, raw mouse deltas and button states as
 `OperatorInput`. Capture rate and accepted keys come from the selected Rule policy.
 The RM2026 control Rule owns keyboard bits, Y/wheel sign conversion, int32 limits,

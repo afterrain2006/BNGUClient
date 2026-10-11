@@ -1,629 +1,109 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed, onActivated, onDeactivated } from 'vue'
-import HudPanel from '@/components/HudPanel.vue'
+import { computed, ref, watch } from 'vue'
+import { useRobotStore } from '@/stores/robotStore'
+import { useRobotSelectionStore } from '@/stores/robotSelectionStore'
+import { useConnectionStore } from '@/stores/connectionStore'
+import { useMatchStore } from '@/stores/matchStore'
+import { getDataFreshness, useFreshnessClock } from '@/composables/useFreshnessClock'
+import RobotHealthBar from '@/components/Dashboard/RobotStatus/RobotHealthBar.vue'
 
-type Team = 'red' | 'blue'
-type Robot = {
-  id: string
-  team: Team
-  x: number
-  y: number
-  hp: number
-  // 渲染位置（用于插值）
-  renderX?: number
-  renderY?: number
-  // 目标位置（实际逻辑位置）
-  targetX?: number
-  targetY?: number
-}
-
-const mapPanel = ref<HTMLDivElement | null>(null)
-const canvas = ref<HTMLCanvasElement | null>(null)
-let ctx: CanvasRenderingContext2D | null = null
-
-const isBorderVisible = ref(false)
-const isControlsModalVisible = ref(false)
-// --- 新增: 边界框顶点和拖拽状态 ---
-const handleRadius = 10 // 拖拽手柄的像素半径
-const corners = reactive([
-  { x: 0.1, y: 0.1 }, // 左上 (百分比)
-  { x: 0.9, y: 0.1 }, // 右上
-  { x: 0.9, y: 0.9 }, // 右下
-  { x: 0.1, y: 0.9 } // 左下
-])
-const draggingCornerIndex = ref<number | null>(null)
-// --- 结束 ---
-
-const mapImage = ref<HTMLImageElement | null>(null)
-
-// 插值参数：控制移动平滑度（0-1，越小越平滑但有延迟）
-const LERP_FACTOR = 0.15
-
-const robots = reactive<Robot[]>([])
-const selectedId = ref<string | null>(null)
-const simRunning = ref(true)
-let rafHandle: number | null = null
-let simInterval: number | null = null
-let resizeObserver: ResizeObserver | null = null
-
-const redTeamRobots = computed(() => robots.filter((r) => r.team === 'red'))
-const blueTeamRobots = computed(() => robots.filter((r) => r.team === 'blue'))
-
-// Initialize sample robots
-function initSampleRobots() {
-  robots.splice(0, robots.length)
-  const ids = ['1', '2', '3', '4', '6', '7']
-  // --- 新增: 获取边界框范围 ---
-  const minX = Math.min(corners[0].x, corners[1].x, corners[2].x, corners[3].x) * 100
-  const maxX = Math.max(corners[0].x, corners[1].x, corners[2].x, corners[3].x) * 100
-  const minY = Math.min(corners[0].y, corners[1].y, corners[2].y, corners[3].y) * 100
-  const maxY = Math.max(corners[0].y, corners[1].y, corners[2].y, corners[3].y) * 100
-  const rangeX = maxX - minX
-  const rangeY = maxY - minY
-  // --- 结束 ---
-
-  // Red Team
-  ids.forEach((id) => {
-    const initX = Math.random() * (rangeX / 2) + minX
-    const initY = Math.random() * rangeY + minY
-    robots.push({
-      id: `R${id}`,
-      team: 'red',
-      x: initX,
-      y: initY,
-      // 初始化渲染位置与实际位置相同
-      renderX: initX,
-      renderY: initY,
-      targetX: initX,
-      targetY: initY,
-      hp: Math.floor(60 + Math.random() * 40)
-    })
-  })
-  // Blue Team
-  ids.forEach((id) => {
-    const initX = Math.random() * (rangeX / 2) + (minX + rangeX / 2)
-    const initY = Math.random() * rangeY + minY
-    robots.push({
-      id: `B${id}`,
-      team: 'blue',
-      x: initX,
-      y: initY,
-      // 初始化渲染位置与实际位置相同
-      renderX: initX,
-      renderY: initY,
-      targetX: initX,
-      targetY: initY,
-      hp: Math.floor(60 + Math.random() * 40)
-    })
-  })
-}
-
-// Simulate robot movement and status changes
-function simulateStep() {
-  // --- 新增: 获取边界框范围 ---
-  const minX = Math.min(corners[0].x, corners[1].x, corners[2].x, corners[3].x) * 100
-  const maxX = Math.max(corners[0].x, corners[1].x, corners[2].x, corners[3].x) * 100
-  const minY = Math.min(corners[0].y, corners[1].y, corners[2].y, corners[3].y) * 100
-  const maxY = Math.max(corners[0].y, corners[1].y, corners[2].y, corners[3].y) * 100
-  // --- 结束 ---
-
-  for (const r of robots) {
-    // 更新目标位置（逻辑位置）
-    const newX = Math.max(minX, Math.min(maxX, r.x + (Math.random() - 0.5) * 3))
-    const newY = Math.max(minY, Math.min(maxY, r.y + (Math.random() - 0.5) * 3))
-
-    r.x = newX
-    r.y = newY
-    r.targetX = newX
-    r.targetY = newY
-
-    // 初始化渲染位置（如果未设置）
-    if (r.renderX === undefined) r.renderX = newX
-    if (r.renderY === undefined) r.renderY = newY
-
-    r.hp = Math.max(0, Math.min(100, r.hp + Math.floor((Math.random() - 0.52) * 2)))
-  }
-}
-
-const startSimulation = () => {
-  if (simInterval) clearInterval(simInterval)
-  simRunning.value = true
-  simInterval = window.setInterval(simulateStep, 500)
-}
-
-const stopSimulation = () => {
-  if (simInterval) clearInterval(simInterval)
-  simInterval = null
-  simRunning.value = false
-}
-
-const toggleSim = () => (simRunning.value ? stopSimulation() : startSimulation())
-
-const selectRobot = (id: string) => (selectedId.value = id)
-
-const handleKeyDown = (event: KeyboardEvent): void => {
-  if (event.key.toLowerCase() === 'p') {
-    isBorderVisible.value = !isBorderVisible.value
-  }
-  // --- 新增: 'e' 键切换控制弹窗 ---
-  if (event.key.toLowerCase() === 'e') {
-    isControlsModalVisible.value = !isControlsModalVisible.value
-  }
-  // --- 结束 ---
-}
-
-const resizeCanvas = (): void => {
-  const cvs = canvas.value
-  const panel = mapPanel.value
-  if (!cvs || !panel || !ctx) return
-
-  const { width, height } = panel.getBoundingClientRect()
-  const dpr = window.devicePixelRatio || 1
-  const displayWidth = Math.round(width)
-  const displayHeight = Math.round(height)
-
-  cvs.width = displayWidth * dpr
-  cvs.height = displayHeight * dpr
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-}
-
-const draw = () => {
-  const currentCtx = ctx
-  const currentCanvas = canvas.value
-
-  if (currentCtx && currentCanvas) {
-    const { width, height } = currentCanvas.getBoundingClientRect()
-    currentCtx.clearRect(0, 0, width, height)
-
-    // --- 绘制地图背景 ---
-    if (mapImage.value) {
-      currentCtx.drawImage(mapImage.value, 0, 0, width, height)
-    } else {
-      currentCtx.fillStyle = '#061226'
-      currentCtx.fillRect(0, 0, width, height)
-    }
-
-    // Draw grid over the map
-    currentCtx.strokeStyle = 'rgba(255, 255, 255, 0.04)'
-    currentCtx.lineWidth = 1
-    for (let i = 0; i < 10; i++) {
-      currentCtx.beginPath()
-      currentCtx.moveTo((i / 10) * width, 0)
-      currentCtx.lineTo((i / 10) * width, height)
-      currentCtx.stroke()
-      currentCtx.beginPath()
-      currentCtx.moveTo(0, (i / 10) * height)
-      currentCtx.lineTo(width, (i / 10) * height)
-      currentCtx.stroke()
-    }
-
-    // --- 绘制可拖拽的场地边界 ---
-    if (isBorderVisible.value) {
-      currentCtx.strokeStyle = 'rgba(255, 255, 255, 0.9)'
-      currentCtx.lineWidth = 3
-      currentCtx.fillStyle = 'rgba(255, 255, 255, 1)'
-
-      // 绘制连接线
-      currentCtx.beginPath()
-      currentCtx.moveTo(corners[0].x * width, corners[0].y * height)
-      for (let i = 1; i < corners.length; i++) {
-        currentCtx.lineTo(corners[i].x * width, corners[i].y * height)
-      }
-      currentCtx.closePath()
-      currentCtx.stroke()
-
-      // 绘制拖拽手柄
-      for (let i = 0; i < corners.length; i++) {
-        currentCtx.beginPath()
-        currentCtx.arc(corners[i].x * width, corners[i].y * height, handleRadius, 0, Math.PI * 2)
-        currentCtx.fill()
-      }
-    }
-    // --- 结束 ---
-
-    // 更新机器人插值位置（在每一帧中平滑移动）
-    robots.forEach((robot) => {
-      if (robot.targetX !== undefined && robot.targetY !== undefined) {
-        // 线性插值（lerp）：renderPos = renderPos + (targetPos - renderPos) * factor
-        robot.renderX = robot.renderX! + (robot.targetX - robot.renderX!) * LERP_FACTOR
-        robot.renderY = robot.renderY! + (robot.targetY - robot.renderY!) * LERP_FACTOR
-      }
-    })
-
-    // Draw robots
-    robots.forEach((robot) => {
-      // 使用插值后的渲染位置
-      const px = ((robot.renderX ?? robot.x) / 100) * width
-      const py = ((robot.renderY ?? robot.y) / 100) * height
-      const isSelected = selectedId.value === robot.id
-      const radius = isSelected ? 8 : 6
-
-      // --- 高亮选中单位 ---
-      if (isSelected) {
-        const pulseTime = Date.now() / 500
-        const pulseRadius = radius + 4 + Math.sin(pulseTime) * 2
-        const pulseOpacity = 0.5 + Math.sin(pulseTime) * 0.2
-
-        currentCtx.beginPath()
-        currentCtx.strokeStyle = `rgba(${
-          robot.team === 'red' ? '248, 113, 113' : '96, 165, 250'
-        }, ${pulseOpacity})`
-        currentCtx.lineWidth = 3
-        currentCtx.arc(px, py, pulseRadius, 0, Math.PI * 2)
-        currentCtx.stroke()
-      }
-      // --- 结束 ---
-
-      currentCtx.beginPath()
-      currentCtx.fillStyle = robot.team === 'red' ? '#f87171' : '#60a5fa'
-      currentCtx.arc(px, py, radius, 0, Math.PI * 2)
-      currentCtx.fill()
-
-      const labelText = `${robot.id} | ${robot.hp}%`
-      currentCtx.font = 'bold 11px Arial'
-      const textMetrics = currentCtx.measureText(labelText)
-      const labelWidth = textMetrics.width + 10
-      const labelHeight = 18
-      const labelX = px + radius + 4
-      const labelY = py - labelHeight / 2
-
-      currentCtx.fillStyle = 'rgba(0, 0, 0, 0.6)'
-      currentCtx.fillRect(labelX, labelY, labelWidth, labelHeight)
-      currentCtx.fillStyle = robot.team === 'red' ? '#fecaca' : '#bfdbfe'
-      currentCtx.textBaseline = 'middle'
-      currentCtx.fillText(labelText, labelX + 5, py)
-    })
-  }
-  rafHandle = requestAnimationFrame(draw)
-}
-
-// --- 新增: 将 CSS 坐标转换为 Canvas 坐标 ---
-function getMousePos(event: MouseEvent): { x: number; y: number } | null {
-  const rect = canvas.value?.getBoundingClientRect()
-  if (!rect) return null
-  return {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top
-  }
-}
-
-// --- 新增: 鼠标按下事件处理 ---
-const handleMouseDown = (event: MouseEvent) => {
-  if (!isBorderVisible.value || !canvas.value) return
-  const pos = getMousePos(event)
-  if (!pos) return
-
-  const { width, height } = canvas.value.getBoundingClientRect()
-
-  for (let i = 0; i < corners.length; i++) {
-    const cornerX = corners[i].x * width
-    const cornerY = corners[i].y * height
-    const distance = Math.sqrt(Math.pow(pos.x - cornerX, 2) + Math.pow(pos.y - cornerY, 2))
-    if (distance < handleRadius) {
-      draggingCornerIndex.value = i
-      window.addEventListener('mousemove', handleMouseMove)
-      window.addEventListener('mouseup', handleMouseUp)
-      break
-    }
-  }
-}
-
-// --- 新增: 鼠标移动事件处理 ---
-const handleMouseMove = (event: MouseEvent) => {
-  if (draggingCornerIndex.value === null || !canvas.value) return
-
-  const pos = getMousePos(event)
-  if (!pos) return
-
-  const { width, height } = canvas.value.getBoundingClientRect()
-
-  // 将坐标限制在 0-1 范围内
-  const newX = Math.max(0, Math.min(1, pos.x / width))
-  const newY = Math.max(0, Math.min(1, pos.y / height))
-
-  const index = draggingCornerIndex.value
-
-  // 定义对角顶点的索引
-  const oppositeIndex = (index + 2) % 4
-  const oppositeCorner = corners[oppositeIndex]
-
-  // 获取由拖动点和对角点定义的矩形边界
-  let minX = Math.min(newX, oppositeCorner.x)
-  let maxX = Math.max(newX, oppositeCorner.x)
-  let minY = Math.min(newY, oppositeCorner.y)
-  let maxY = Math.max(newY, oppositeCorner.y)
-
-  // 根据新的边界重新计算所有四个顶点的位置
-  corners[0] = { x: minX, y: minY } // 左上
-  corners[1] = { x: maxX, y: minY } // 右上
-  corners[2] = { x: maxX, y: maxY } // 右下
-  corners[3] = { x: minX, y: maxY } // 左下
-}
-
-// --- 新增: 鼠标松开事件处理 ---
-const handleMouseUp = () => {
-  if (draggingCornerIndex.value !== null) {
-    // --- 新增: 保存边界数据 ---
-    window.api.setBoundaryCorners(JSON.parse(JSON.stringify(corners)))
-    // --- 结束 ---
-  }
-  draggingCornerIndex.value = null
-  window.removeEventListener('mousemove', handleMouseMove)
-  window.removeEventListener('mouseup', handleMouseUp)
-}
-
-// --- 新增: 重置边界框到默认位置 ---
-const resetBoundary = () => {
-  const defaultCorners = [
-    { x: 0.1, y: 0.1 }, // 左上
-    { x: 0.9, y: 0.1 }, // 右上
-    { x: 0.9, y: 0.9 }, // 右下
-    { x: 0.1, y: 0.9 } // 左下
-  ]
-  corners.splice(0, corners.length, ...defaultCorners)
-  // 保存重置后的默认值
-  window.api.setBoundaryCorners(JSON.parse(JSON.stringify(corners)))
-}
-// --- 结束 ---
-
-onMounted(async () => {
-  // --- 新增: 加载已保存的边界数据 ---
-  const savedCorners = await window.api.getBoundaryCorners()
-  if (savedCorners && savedCorners.length === 4) {
-    corners.splice(0, corners.length, ...savedCorners)
-  }
-  // --- 结束 ---
-
-  // --- 新增: 加载地图图片 ---
-  const img = new Image()
-  img.src = '/Map.png'
-  img.onload = () => {
-    mapImage.value = img
-  }
-  img.onerror = (err) => {
-    console.error('Failed to load map image:', err)
-  }
-  // --- 结束 ---
-  if (canvas.value) {
-    ctx = canvas.value.getContext('2d')
-    resizeCanvas()
-    resizeObserver = new ResizeObserver(resizeCanvas)
-    if (mapPanel.value) {
-      resizeObserver.observe(mapPanel.value)
-    }
-  }
-  initSampleRobots()
-  startSimulation()
-  draw()
-  // --- 新增: 为拖拽功能添加事件监听 ---
-  if (canvas.value) {
-    canvas.value.addEventListener('mousedown', handleMouseDown)
-  }
-  // --- 结束 ---
+const robots = useRobotStore()
+const selection = useRobotSelectionStore()
+const connection = useConnectionStore()
+const match = useMatchStore()
+const now = useFreshnessClock()
+const robot = computed(() => robots.getRobot(selection.selectedRobotId))
+const healthFreshness = computed(() => getDataFreshness(robot.value?.healthUpdatedAt ?? 0, now.value))
+const moduleFreshness = computed(() => getDataFreshness(robot.value?.modulesUpdatedAt ?? 0, now.value))
+const history = ref<{ at: number; value: number }[]>([])
+let sampledHealthAt = 0
+const exportMessage = ref('')
+const moduleLabels = {
+  powerManager: '电源管理', rfid: 'RFID', lightStrip: '灯条', smallShooter: '17 mm 发射',
+  bigShooter: '42 mm 发射', uwb: '定位', armor: '装甲', videoTransmission: '图传',
+  capacitor: '电容', mainController: '主控', laserDetectionModule: '激光检测'
+} as const
+watch(() => [selection.selectedRobotId, connection.activeClientId, connection.connected], () => {
+  history.value = []
+  sampledHealthAt = 0
+  exportMessage.value = ''
+}, { flush: 'sync' })
+watch(now, () => {
+  const current = robot.value
+  if (!connection.connected || healthFreshness.value !== 'fresh' || current?.combat.currentHealth === undefined || current.healthUpdatedAt === sampledHealthAt) return
+  sampledHealthAt = current.healthUpdatedAt
+  history.value = [...history.value, { at: current.healthUpdatedAt, value: current.combat.currentHealth }].slice(-120)
 })
-
-onUnmounted(() => {
-  if (rafHandle) cancelAnimationFrame(rafHandle)
-  stopSimulation()
-  if (resizeObserver && mapPanel.value) {
-    resizeObserver.unobserve(mapPanel.value)
-  }
-  // --- 新增: 移除事件监听 ---
-  if (canvas.value) {
-    canvas.value.removeEventListener('mousedown', handleMouseDown)
-  }
-  window.removeEventListener('mousemove', handleMouseMove)
-  window.removeEventListener('mouseup', handleMouseUp)
-  // --- 结束 ---
-})
-
-// --- 新增: 处理组件激活/非激活状态 ---
-onActivated(() => {
-  window.addEventListener('keydown', handleKeyDown)
-})
-
-onDeactivated(() => {
-  window.removeEventListener('keydown', handleKeyDown)
-})
+const chartMax = computed(() => Math.max(1, robot.value?.configuration.maxHealth ?? 0, ...history.value.map(sample => sample.value)))
+const chartPoints = computed(() => history.value.map((sample, index) => {
+  const x = history.value.length <= 1 ? 0 : index / (history.value.length - 1) * 600
+  return x + ',' + (110 - sample.value / chartMax.value * 100)
+}).join(' '))
+function display(value: unknown) {
+  if (typeof value === 'number') return Number(value.toFixed(2)).toString()
+  return value === undefined || value === null ? '—' : String(value)
+}
+function exportSnapshot() {
+  const snapshot = { exportedAt: new Date().toISOString(), connection: { connected: connection.connected, activeClientId: connection.activeClientId, messagesReceived: connection.messagesReceived, lastMessageTime: connection.lastMessageTime }, selectedRobotId: selection.selectedRobotId, robots: robots.robots, match: match.state, healthSamples: history.value }
+  const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'bnguclient-telemetry-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json'
+  link.click()
+  URL.revokeObjectURL(url)
+  exportMessage.value = '已导出当前状态快照，不包含连接密码。'
+}
 </script>
 
 <template>
-  <div class="telemetry-root">
-    <div class="map-panel" ref="mapPanel">
-      <canvas ref="canvas"></canvas>
-
-      <!-- 新增: 提示文字 -->
-      <div class="hint">
-        <span>按 E 打开设置菜单</span>
-        <span class="separator">|</span>
-        <span>按 P 绘制虚拟边界</span>
-      </div>
-
-      <!-- 修改: 移除 controls-container -->
-
-      <div class="legend">
-        <div class="legend-item"><span class="dot red"></span> 红队</div>
-        <div class="legend-item"><span class="dot blue"></span> 蓝队</div>
-      </div>
-
-      <!-- 新增: 控制功能弹窗 -->
-      <Transition name="modal-fade">
-        <div
-          v-if="isControlsModalVisible"
-          class="modal-backdrop"
-          @click="isControlsModalVisible = false"
-        >
-          <div class="modal-content" style="width: 280px" @click.stop>
-            <h4>功能控制</h4>
-            <div class="modal-actions" style="flex-direction: column; gap: 12px">
-              <button class="modal-button-secondary" @click="toggleSim">
-                {{ simRunning ? '停止模拟' : '启动模拟' }}
-              </button>
-              <button class="modal-button-secondary" @click="resetBoundary">重置边界</button>
-            </div>
-          </div>
-        </div>
-      </Transition>
-      <!-- 结束 -->
-
-      <HudPanel
-        title="红队状态"
-        team="red"
-        :initial-style="{ top: '12px', left: '12px', width: '280px' }"
-      >
-        <div class="telemetry-panel-body">
-          <div class="list">
-            <div
-              v-for="r in redTeamRobots"
-              :key="r.id"
-              :class="{ 'robot-row': true, selected: selectedId === r.id }"
-              @click="selectRobot(r.id)"
-            >
-              <span class="badge" :class="r.team">{{ r.id }}</span>
-              <div class="meta">
-                <span>HP: {{ r.hp }}%</span>
-                <span>Pos: ({{ r.x.toFixed(1) }}, {{ r.y.toFixed(1) }})</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </HudPanel>
-
-      <HudPanel
-        title="蓝队状态"
-        team="blue"
-        :initial-style="{ top: '12px', right: '12px', width: '280px' }"
-      >
-        <div class="telemetry-panel-body">
-          <div class="list">
-            <div
-              v-for="r in blueTeamRobots"
-              :key="r.id"
-              :class="{ 'robot-row': true, selected: selectedId === r.id }"
-              @click="selectRobot(r.id)"
-            >
-              <span class="badge" :class="r.team">{{ r.id }}</span>
-              <div class="meta">
-                <span>HP: {{ r.hp }}%</span>
-                <span>Pos: ({{ r.x.toFixed(1) }}, {{ r.y.toFixed(1) }})</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </HudPanel>
+  <div class="telemetry-page">
+    <header class="telemetry-heading"><div><p class="eyebrow">TELEMETRY / LIVE STATE</p><h1>遥测检查</h1><p>只读当前数据链；没有收到的字段显示为「—」，不会填入演示值。</p></div><button @click="exportSnapshot">导出状态快照</button></header>
+    <p v-if="exportMessage" class="export-notice" role="status">{{ exportMessage }}</p>
+    <div class="telemetry-grid">
+      <section class="telemetry-card">
+        <h2>显示机器人 <span>{{ selection.selectedRobotName || '未选择' }} / {{ selection.selectedRobotId || '—' }}</span></h2>
+        <RobotHealthBar :current-health="robot?.combat.currentHealth ?? null" :max-health="robot?.configuration.maxHealth ?? null" :status="healthFreshness" />
+        <dl class="metric-grid"><div><dt>剩余弹量</dt><dd>{{ display(robot?.combat.remainingAmmo) }}</dd></div><div><dt>射击热量</dt><dd>{{ display(robot?.combat.currentHeat) }} / {{ display(robot?.configuration.maxHeat) }}</dd></div><div><dt>底盘能量 / J</dt><dd>{{ display(robot?.combat.currentChassisEnergy) }}</dd></div><div><dt>缓冲能量 / J</dt><dd>{{ display(robot?.combat.currentBufferEnergy) }}</dd></div><div><dt>等级</dt><dd>{{ display(robot?.configuration.level) }}</dd></div><div><dt>位置 / m</dt><dd>{{ display(robot?.pose.position.x) }}, {{ display(robot?.pose.position.y) }}</dd></div></dl>
+      </section>
+      <section class="telemetry-card"><h2>链路信息</h2><dl class="connection-list"><div><dt>MQTT</dt><dd :class="{ online: connection.connected }">{{ connection.connected ? '已连接' : '未连接' }}</dd></div><div><dt>连接 Client ID</dt><dd>{{ connection.activeClientId ?? '—' }}</dd></div><div><dt>累计接收消息</dt><dd>{{ connection.messagesReceived }}</dd></div><div><dt>最后一条消息</dt><dd>{{ connection.lastMessageTime ? new Date(connection.lastMessageTime).toLocaleTimeString() : '尚未收到' }}</dd></div><div><dt>已记录机器人</dt><dd>{{ Object.keys(robots.robots).length }}</dd></div></dl><p class="card-note">显示机器人与连接身份分别管理；切换显示对象不会修改消息路由。</p></section>
+      <section class="telemetry-card history-card"><h2>血量变化 <span>{{ history.length }} / 120 个采样点</span></h2><div v-if="history.length" class="history-chart"><svg viewBox="0 0 600 120" role="img" aria-label="最近血量采样趋势" preserveAspectRatio="none"><path d="M0 10H600 M0 60H600 M0 110H600" class="chart-grid" /><polyline :points="chartPoints" class="chart-line" /><circle v-for="(sample, index) in history" :key="sample.at" :cx="history.length <= 1 ? 0 : index / (history.length - 1) * 600" :cy="110 - sample.value / chartMax * 100" r="2" /></svg></div><div v-else class="telemetry-empty">等待当前机器人的新鲜血量报告</div><p class="card-note">每秒最多采样一次新报告，保留最近 120 点；切换机器人或连接后清空。不是完整报文录制。</p></section>
+      <section class="telemetry-card"><h2>模块状态 <span>{{ moduleFreshness === 'fresh' ? '报告有效' : moduleFreshness === 'stale' ? '报告已过期' : '等待报告' }}</span></h2><div class="module-grid"><div v-for="(label, key) in moduleLabels" :key="key" :class="{ online: moduleFreshness === 'fresh' && robot?.modules[key] === 'online', offline: moduleFreshness === 'fresh' && robot?.modules[key] === 'offline' }"><i /><span>{{ label }}</span><small>{{ moduleFreshness !== 'fresh' ? '—' : robot?.modules[key] === 'online' ? '在线' : robot?.modules[key] === 'offline' ? '离线' : '未知' }}</small></div></div></section>
     </div>
+    <section class="telemetry-card robot-list"><h2>已接收机器人</h2><div v-if="!Object.keys(robots.robots).length" class="telemetry-empty">连接后等待遥测数据。可在操作中心配置 MQTT。</div><div v-else class="robot-table-scroll"><table><thead><tr><th>机器人 ID</th><th>血量</th><th>热量</th><th>位置 X / Y</th><th>血量有效性</th></tr></thead><tbody><tr v-for="entry in robots.robots" :key="entry.identity.robotId"><td>{{ entry.identity.robotId }}</td><td>{{ display(entry.combat.currentHealth) }} / {{ display(entry.configuration.maxHealth) }}</td><td>{{ display(entry.combat.currentHeat) }}</td><td>{{ display(entry.pose.position.x) }} / {{ display(entry.pose.position.y) }}</td><td>{{ getDataFreshness(entry.healthUpdatedAt, now) === 'fresh' ? '新鲜' : getDataFreshness(entry.healthUpdatedAt, now) === 'stale' ? '已过期' : '未收到' }}</td></tr></tbody></table></div></section>
   </div>
 </template>
 
 <style scoped>
-.telemetry-root {
-  width: 100%;
-  height: 100%;
-}
-.map-panel {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-.legend {
-  position: absolute;
-  left: 12px;
-  top: 12px;
-  display: flex;
-  gap: 8px;
-  z-index: 20;
-}
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.36);
-  border-radius: 6px;
-  font-size: 13px;
-  color: #dbeafe;
-}
-.dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-.dot.red {
-  background: #f87171;
-}
-.dot.blue {
-  background: #60a5fa;
-}
-
-/* --- 新增: 提示文字样式 --- */
-.hint {
-  position: absolute;
-  bottom: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: rgba(255, 255, 255, 0.38);
-  font-size: 12px;
-  z-index: 50;
-  display: flex;
-  gap: 12px;
-  user-select: none;
-  white-space: nowrap;
-}
-
-.separator {
-  color: rgba(255, 255, 255, 0.15);
-}
-/* --- 结束 --- */
-
-/* --- DELETED: Controls modal styles moved to modals.css --- */
-
-/* --- DELETED: Button group styles moved to modals.css --- */
-
-.telemetry-panel-body .list {
-  /* No margin needed as it's the only element */
-}
-
-.robot-row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 6px;
-  border-radius: 6px;
-  margin-bottom: 6px;
-  background: rgba(255, 255, 255, 0.02);
-  cursor: pointer;
-}
-.robot-row.selected {
-  background: linear-gradient(90deg, rgba(59, 130, 246, 0.14), rgba(244, 63, 94, 0.06));
-}
-.badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 28px;
-  border-radius: 6px;
-  color: #fff;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.badge.red {
-  background: #f87171;
-}
-.badge.blue {
-  background: #60a5fa;
-}
-.meta {
-  display: flex;
-  flex-direction: column;
-  font-size: 12px;
-  color: #cbd5e1;
-  gap: 2px;
-}
+.telemetry-page { color: #d7e7ed; padding: 30px; max-width: 1350px; margin: 0 auto; }
+.telemetry-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 24px; }
+.eyebrow { font: 11px var(--font-tech-mono); letter-spacing: .12em; color: #86a5b4; }
+h1 { font-size: 27px; font-weight: 500; margin: 12px 0 10px; }
+.telemetry-heading p:last-child, .card-note { font-size: 12px; color: #8faab7; line-height: 1.8; }
+button { border: 1px solid #6d8e9a88; background: #1e343f; color: #bfe4eb; border-radius: 4px; padding: 10px 16px; cursor: pointer; white-space: nowrap; }
+button:hover { background: #2b4856; } button:focus-visible { outline: 2px solid #b1dfe5; outline-offset: 3px; }
+.telemetry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.telemetry-card { padding: 23px; border: 1px solid #46616e66; background: #14242c88; border-radius: 4px; min-width: 0; }
+h2 { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; margin-bottom: 24px; }
+h2 span { font-size: 10px; color: #8faab7; }
+.metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 24px; }
+dt { font-size: 11px; color: #8faab7; } dd { margin: 5px 0 0; font: 20px var(--font-tech-mono); overflow-wrap: anywhere; }
+.connection-list > div { display: flex; justify-content: space-between; gap: 20px; align-items: center; margin-bottom: 13px; }
+.connection-list dd { font-size: 14px; margin: 0; }
+.card-note { margin-top: 16px; }
+.online { color: #b4d9b2; }
+.telemetry-empty { display: grid; min-height: 130px; place-items: center; color: #7f9eac; font-size: 12px; text-align: center; }
+.history-chart { height: 140px; padding: 10px 4px; } .history-chart svg { width: 100%; height: 100%; overflow: visible; }
+.chart-grid { stroke: #38546066; fill: none; } .chart-line { stroke: #b1dfe5; stroke-width: 2; fill: none; vector-effect: non-scaling-stroke; }
+.history-chart circle { fill: #b1dfe5; }
+.module-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.module-grid > div { display: flex; gap: 8px; align-items: center; color: #829aa5; font-size: 11px; }
+.module-grid i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.module-grid small { margin-left: auto; font-size: 10px; }
+.module-grid .offline { color: #d29c97; }
+.robot-list { margin-top: 18px; } .robot-table-scroll { overflow: auto; }
+table { width: 100%; text-align: left; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+th { color: #8faab7; font-weight: 400; } td, th { padding: 12px; border-bottom: 1px solid #38546066; }
+.export-notice { color: #b4d9b2; font-size: 12px; margin: 0 0 18px; }
+@media (max-width: 1050px) { .telemetry-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .telemetry-page { padding: 20px 16px; } .telemetry-heading { flex-direction: column; } .telemetry-card { padding: 16px; } .module-grid { gap: 12px; } }
 </style>

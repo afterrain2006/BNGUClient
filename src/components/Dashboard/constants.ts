@@ -143,7 +143,7 @@ export const DEFAULT_EXCHANGEABLE_AMMO = 100
 /**
  * 默认视频状态文本
  */
-export const DEFAULT_VIDEO_STATUS = '按 P 键打开菜单，选择视频源后连接'
+export const DEFAULT_VIDEO_STATUS = '按 Esc 打开操作菜单，配置图传与连接'
 
 /**
  * 默认摄像头状态

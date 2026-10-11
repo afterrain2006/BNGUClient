@@ -28,7 +28,7 @@ git remote -v
 
 ### 2.1 前端 Console
 
-1. 在客户端底部“设置”页打开“调试模式”。
+1. 按 Esc，在“系统设置”页打开“调试模式”。
 2. 返回图传页，必要时按住 Backspace 释放捕获，按 F12 打开 DevTools。
 3. Console 关注 startup、MQTT、RM2026、UDP、ControlOutput 和 RobotState DEV 等前缀。
 4. Sources 对 TypeScript/Vue 下断点；网络面板中的本地 udp.mjpg 是视频展示流，不是 MQTT Broker。
@@ -99,7 +99,7 @@ flowchart LR
 
 链路为 RoboControl → OperatorInput → controlSender → 控制 Rule → mqttAdapter → Rust MQTT。
 
-先连接本地 Mock，关闭 Dashboard 菜单，进入捕获后按键/移动鼠标，在 Mock 终端查 RX CONTROL：
+先连接本地 Mock，关闭菜单并手动点击“启用键鼠控制”，进入捕获后按键/移动鼠标，在 Mock 终端查 RX CONTROL：
 
 - KeyboardMouseControl 是否收到；W/S/A/D 位图是否符合当前规则。
 - 浏览器鼠标正 Y 与协议 Y 方向在 Rule 内转换；不要在 UI 再反转一次。
