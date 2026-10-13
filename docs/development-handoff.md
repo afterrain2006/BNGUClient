@@ -1,95 +1,81 @@
-# 本次开发交付说明
+# 上机前检查清单
 
-这是 BNGUClient 渐进式重构的开发收尾版本，发布源码和验证工具，不宣称已完成赛场验收。
+先在本机按 [安装教程](installation-and-usage.md#5-没有机器人也能测试) 跑通，再由网络和电控负责人陪同连接真实设备。本机测试成功不代表机器人已经可以安全上场。
 
-## 已完成
+## 1. 先确认这次交付的是什么
 
-- 删除旧 mqtt_data、MQTT Worker / PayloadDecoder / mqtt_protocol 入站链，UI 从新状态读取。
-- RM2026 规则将协议转换为 RobotUpdate、MatchUpdate 和 CustomDataUpdate。
-- 本机身份来自已建立连接的 Client ID；UI 当前选择与连接身份独立。
-- 静态、动态、模块、位置、全局血量、比赛状态、队伍经济、机制、增益、事件及相关专用状态接入新链。
-- 模块灯和血量区分未收到、有效、过期、断线和重连等待；零值与 false 不会被当成缺失字段。
-- 保留既有 HUD/XML/YAML 绑定路径，通过只读投影读取新 Domain。
-- 键鼠内部输入不携带 RM2026 位图；当前规则负责一一对应映射和 protobuf 编码。
-- 控制发送保留单个在途任务和合并待发送输入；退出捕获用中立帧替换积压，断线和卸载取消未提交任务。
-- 主入口保存监听清理函数，并在 HMR dispose 时释放；Dashboard 不再重复注册遥测入口。
-- 提供状态预览、本地 Mock、前端回归测试和 Windows/Linux CI。
-- 参考 Reference 的交互组织，增加常驻图传 + Esc 操作菜单、专注模式和 HUD 工作台；没有引入 Reference 的旧协议/Store 链。
-- 遥测页改读真实状态，增加有界血量采样和 JSON 快照；显式启用操控，菜单、失焦及连接变化后需要手动重新启用。
+这是 BNGUClient 的代码和测试工具，不是已经完成所有现场验收的产品。
 
-## 三条独立链
+已经接上的部分包括：机器人和比赛状态、血量和模块灯、UDP 图传、键鼠输入、界面面板和原始自定义字节接收。具体赛事格式放在 `rules/rm2026`，客户端页面在 `src/pages`。
 
-```mermaid
-flowchart TD
-    MQTT[官方或测试 MQTT] --> Adapter[Tauri MQTT adapter]
-    Adapter --> Runner[mqttRuleRunner]
-    Runner --> Telemetry[入站 RM2026 Rule]
-    Telemetry --> State[Domain + Stores]
-    State --> UI[Dashboard / HUD]
-    Keys[键鼠设备] --> Capture[RoboControl]
-    Capture --> Input[OperatorInput]
-    Input --> Sender[controlSender]
-    Sender --> Control[出站控制 Rule]
-    Control --> Adapter
-    UDP[UDP 视频分片] --> Assembly[Rust 组帧]
-    Assembly --> Decoder[Rust H.265 解码]
-    Decoder --> MJPEG[本地 MJPEG 服务]
-    MJPEG --> UI
-```
+尚未完成或不能当成完成：
 
-`mqttRuleRunner` 负责入站分发，不承担所有出站操作，也不解码视频。赛事协议映射由 Rule 做，运行时传输由 Adapter 做，状态更新由 Store 做。
+- 电控自定义字节还没有最终约定，`src/desktop/api.ts` 的 `parseCustomData()` 还未实现。
+- 自定义图片的拼接和显示未完成。看到原始字节不等于能看到图片。
+- K 键菜单里的部分操作只有占位代码。
+- 地图位置、现场网络和视频延迟需要现场检查。
+- 客户端释放按键不能替代机器人端断线保护。
 
-## 以后替换控制规则
+## 2. 接线、联网前先问清楚
 
-1. 保留 `OperatorInput`（按键 code、浏览器方向鼠标位移、滚轮步数和按钮），不把电控动作塞进 UI。
-2. 实现 `MqttControlRule`：提供采集策略和 `encode(input)`，返回 topic、bytes、QoS 和 retain。
-3. 在 `src/output/clientControlOutput.ts` 的组合点选择新规则；不必改 RoboControl 或 robotStore。
-4. 用测试确认键码、鼠标方向、松键帧以及断线语义，与电控约定字节内容和失联超时。
+把下表填写或记录好，不凭默认值猜。客户端里怎样填见 [连接实机说明](installation-and-usage.md#8-改成连接真实机器人)。
 
-这个接口适用于更换 MQTT 控制编码。直接接串口的自定义控制器需要独立设备 Adapter，把输入转换为相同 `OperatorInput` 后复用发送链；不能把串口包当 MQTT protobuf 包，也不必绕道入站 mqttRuleRunner。
+| 信息 | 应向谁确认 |
+| --- | --- |
+| 状态服务器 IP、MQTT 端口 | 现场网络负责人 |
+| 当前机器人的 Client ID | 赛事配置或电控负责人 |
+| 是否需要用户名、密码 | 服务器负责人；当前页面只有用户名框 |
+| 视频来源 IP | 图传负责人 |
+| 视频发往客户端电脑的 IP、UDP 端口 | 网络和图传负责人 |
+| 按键、鼠标分别对应什么动作 | 电控负责人 |
+| 数据中断多久进入安全状态 | 电控负责人，不能只靠客户端松键 |
 
-普通 MQTT 命令面板仍通过兼容 API 和 RM2026 公共编码器发送协议命令。本阶段隔离的是键鼠操控链，没有声称所有命令都已转换成通用输入。
+用 `ipconfig` 确认电脑连接现场网络那张网卡的 IPv4。不要把无线网卡、虚拟网卡或 127.0.0.1 的地址误报给视频发送端。
 
-## 未完成或须现场确认
+## 3. 先看数据和画面，不启用操控
 
-- `parseCustomData()` 仍为 null 占位：电控尚未确定最终字节布局，不能猜字段实现解析。
-- 自定义图片的格式、分片、丢包处理和展示未完成。当前合并积压策略只适合最新状态，不适合直接重组图片。
-- K 键菜单中部分操作仅记录日志。图传视频与自定义图片不是同一条输入链。
-- 原始数据能看见不等于业务字段能正确解析；Mock 测试通过不等于真实机器人安全可控。
-- 已提交给底层 MQTT 的消息无法撤回。QoS 0 和释放帧都可能丢失，电控必须独立做超时保护。
-- 产品名、程序名、环境变量和应用图标已统一为 BNGUClient；AI、Python 桥接、占位视频分发及旧 AI 打包分支已移除。可选内嵌 FFmpeg 和安装包仍须分别验证。
-- 本机 Windows 检查不等于 Linux 运行验收；跨平台检查交由 CI 补充。
+- 停止本机测试服务，改成实际服务器地址和编号，断开旧连接后重新连接。
+- “机器人型号”选对显示对象；它和 Client ID 是两回事。
+- MQTT 显示已连接，消息条数增长。
+- 血量、最大血量、模块和位置有对应报告。灰色要区分没报告、过期和断线，不能一律当故障。
+- 如果提示收到的编号与连接编号不一致，先查配置，不通过硬改代码掩盖。
+- 视频发送目标是这台客户端电脑，UDP 端口一致，来源过滤地址正确。
+- 检查画面延迟、短时丢包后是否恢复，以及地图坐标是否对应实际位置。
 
-## 现场联调清单
+## 4. 再测操控，先架空或禁用危险部件
 
-1. 检查 Broker 地址、端口、Client ID 与机器人编号，不以 UI 选择推断本机身份。
-2. 验证 StaticStatus 正常到达；身份不匹配时有 warning 且不更新错误机器人。
-3. 观察 DynamicStatus、ModuleStatus、Position 与全局血量的更新，确认红蓝映射及位置单位。
-4. 断开重连后确认旧状态不被当作新报告、模块灯重新等待新消息。
-5. 先架空或禁用执行机构，核对 W/S/A/D、修饰键、鼠标方向与松键数据，再确认电控动作。
-6. 测试失焦、菜单打开、退出捕获及断网；确认机器人端独立超时保护。
-7. 测试 UDP 画面、关键帧恢复、丢包与端到端延迟，校准地图坐标。
-8. 电控协议确定后单独实现和验收自定义数据解析，不将当前样例配置视为最终协议。
+需要电控人员在场，先保证误操作不会伤人或损坏设备。
 
-## 复现验证
+- 点击“启用键鼠控制”，逐项测试 W/S/A/D、其他键和鼠标方向。
+- 电控确认收到的键、按钮和移动方向正确，再确认实际动作。
+- 松开按键后，应不再保持该键；不要只检查“按下有反应”。
+- 按住 W 时打开 Esc 菜单，检查释放；关菜单后不应自动启用。
+- 切到其他软件、断开连接、重新连接，检查是否保持未启用状态。
+- 真正断网时，确认**机器人端自己**在约定时间内进入安全状态。发出去的归零消息可能丢失，这一项不能省。
+
+## 5. 保存现场记录
+
+至少记录：代码版本、操作系统、连接参数、显示机器人、视频编码、测试步骤、结果和未通过项。不要记录密码或令牌。
+
+遥测页“导出状态快照”可保存当时的数据，但不是全程录像或完整报文记录。视频延迟和机器人动作还需另行观察记录。
+
+有问题按 [排错说明](debugging.md) 保存第一条错误和前后几行。没测过的项目明确写“未测试”，不要默认为通过。
+
+## 6. 维护代码的人提交前做什么
+
+所有命令从项目根目录 PowerShell 执行：
 
 ```powershell
-npm ci
-npm run check
-npm run build
+npm.cmd run check
+npm.cmd run build
+npm.cmd run typecheck --prefix tools/rm2026-mock-server
+npm.cmd test --prefix tools/rm2026-mock-server
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast
 git diff --check
 ```
 
-Mock 独立依赖安装与验证：
+还要构建并打开真实桌面客户端；只有网页构建成功，不代表客户端或安装器能运行。Windows/Linux 检查和干净电脑安装也要分别记录。
 
-```powershell
-cd tools/rm2026-mock-server
-npm ci
-npm test
-npm run typecheck
-```
-
-本次整理不改动本地参考副本、原始 rar、用户的 Python 项目文件、依赖目录或旧构建缓存。上游 AI 源码发行包已从当前源码移除；上游 Git 历史、作者声明和许可证保留，可从历史恢复已删除的受版本管理文件。
+以后换队伍协议，保留“程序内部记录按了什么”的格式，在 `rules` 增加对应转换，选择入口在 `src/app/clientControlOutput.ts`。串口控制器另做设备输入，不能把串口字节直接当 MQTT 消息。更具体的文件位置见 [目录导航](project-map.md)。

@@ -11,8 +11,10 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      '@core': fileURLToPath(new URL('./core', import.meta.url)),
+      '@rules': fileURLToPath(new URL('./rules', import.meta.url)),
       '@protobufjs/inquire': fileURLToPath(
-        new URL('./src/shims/protobuf-inquire-shim.cjs', import.meta.url)
+        new URL('./src/desktop/shims/protobuf-inquire-shim.cjs', import.meta.url)
       )
     }
   },
@@ -43,9 +45,9 @@ export default defineConfig(async () => ({
           }
 
           if (
-            normalizedId.endsWith('/src/api-shim.ts') ||
-            normalizedId.includes('/src/rules/rm2026/') ||
-            normalizedId.endsWith('/src/generated/mqtt-proto.json')
+            normalizedId.endsWith('/src/desktop/api.ts') ||
+            normalizedId.includes('/rules/rm2026/') ||
+            normalizedId.endsWith('/rules/rm2026/generated/mqtt-proto.json')
           ) {
             return 'mqtt-runtime'
           }

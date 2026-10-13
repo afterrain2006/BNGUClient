@@ -1,18 +1,18 @@
-import './assets/main.css'
-import './assets/modals.css'
+import '@/assets/main.css'
+import '@/assets/modals.css'
 
 
 import { createApp, watch } from 'vue'
-import App from './App.vue'
-import pinia from './store'
-import { addLog } from './store/log'
-import { startMqttRule } from './input/mqttRuleRunner'
-import { createRm2026RuleLifecycle } from './input/rm2026RuleLifecycle'
-import { mqttAdapter } from './adaptor/tauri/mqttAdapter'
-import { useRobotStore } from './stores/robotStore'
-import { useMatchStore } from './stores/matchStore'
-import { useCustomDataStore } from './stores/customDataStore'
-import { useConnectionStore } from './stores/connectionStore'
+import App from '@/app/App.vue'
+import pinia from '@/state'
+import { addLog } from '@/state/ui/log'
+import { startMqttRule } from '@/communication/mqtt/mqttRuleRunner'
+import { createRm2026RuleLifecycle } from '@/app/rm2026RuleLifecycle'
+import { mqttAdapter } from '@/communication/mqtt/mqttAdapter'
+import { useRobotStore } from '@/state/telemetry/robotStore'
+import { useMatchStore } from '@/state/telemetry/matchStore'
+import { useCustomDataStore } from '@/state/telemetry/customDataStore'
+import { useConnectionStore } from '@/state/telemetry/connectionStore'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 
 let stopMqttStatus: UnlistenFn | undefined
@@ -94,9 +94,9 @@ console.error = (...args: unknown[]) => {
 // 创建 Vue 应用并注册 Pinia
 async function bootstrap(): Promise<void> {
   const startupAt = performance.now()
-  const apiShimAt = performance.now()
-  await import('./api-shim')
-  console.log(`[startup] api-shim loaded in ${(performance.now() - apiShimAt).toFixed(1)}ms`)
+  const desktopApiAt = performance.now()
+  await import('@/desktop/api')
+  console.log(`[startup] desktop API loaded in ${(performance.now() - desktopApiAt).toFixed(1)}ms`)
 
   const app = createApp(App)
   app.use(pinia)

@@ -7,7 +7,7 @@ const bundle = await build({
   stdin: {
     contents: `
       import { createPinia, setActivePinia } from 'pinia'
-      import { useRobotStore } from '../src/stores/robotStore'
+      import { useRobotStore } from '../src/state/telemetry/robotStore'
       export function createStore() {
         setActivePinia(createPinia())
         return useRobotStore()

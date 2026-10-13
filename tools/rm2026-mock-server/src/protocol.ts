@@ -2,7 +2,7 @@ import path from 'node:path'
 import protobuf from 'protobufjs'
 import { REPO_ROOT } from './config.js'
 
-export const PROTO_PATH = path.join(REPO_ROOT, 'UDP-MQTT Server', 'proto', 'messages.proto')
+export const PROTO_PATH = path.join(REPO_ROOT, 'rules', 'rm2026', 'proto', 'messages.proto')
 
 export function messageNameFromTopic(topic: string): string {
   const slashSegment = topic.split('/').pop()?.trim() || topic

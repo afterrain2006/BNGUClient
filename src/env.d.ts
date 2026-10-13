@@ -40,7 +40,7 @@ type GraphicTemplateCategories = {
 interface BnguClientApi {
   [key: string]: any;
   onMaximizedStateChanged?: (cb: (state: boolean) => void) => UnlistenFn;
-  onMatchStatusChanged?: (cb: (status: import('@/components/Dashboard/types').MatchStatus) => void) => UnlistenFn;
+  onMatchStatusChanged?: (cb: (status: import('@/config/types').MatchStatus) => void) => UnlistenFn;
   isDevToolsOpened?: () => Promise<boolean>;
   openDevTools?: () => Promise<void>;
   closeDevTools?: () => Promise<void>;

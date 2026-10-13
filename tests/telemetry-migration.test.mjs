@@ -9,19 +9,19 @@ import Long from 'long'
 protobuf.util.Long = Long
 protobuf.configure()
 
-const root = protobuf.Root.fromJSON(JSON.parse(readFileSync(new URL('../src/generated/mqtt-proto.json', import.meta.url), 'utf8')))
+const root = protobuf.Root.fromJSON(JSON.parse(readFileSync(new URL('../rules/rm2026/generated/mqtt-proto.json', import.meta.url), 'utf8')))
 const bundle = await build({
   stdin: {
     contents: `
       import { createPinia, setActivePinia } from 'pinia'
       import { effectScope } from 'vue'
-      import { useRobotStore } from '../src/stores/robotStore'
-      import { useMatchStore } from '../src/stores/matchStore'
-      import { useRobotSelectionStore } from '../src/stores/robotSelectionStore'
-      import { useConnectionStore } from '../src/stores/connectionStore'
-      import { useTelemetryView } from '../src/composables/useTelemetryView'
-      export { createRm2026Rule, encodeRm2026Command } from '../src/rules/rm2026'
-      export { createCustomDataInput } from '../src/input/customDataInput'
+      import { useRobotStore } from '../src/state/telemetry/robotStore'
+      import { useMatchStore } from '../src/state/telemetry/matchStore'
+      import { useRobotSelectionStore } from '../src/state/ui/robotSelectionStore'
+      import { useConnectionStore } from '../src/state/telemetry/connectionStore'
+      import { useTelemetryView } from '../src/telemetry/useTelemetryView'
+      export { createRm2026Rule, encodeRm2026Command } from '../rules/rm2026'
+      export { createCustomDataInput } from '../src/communication/custom-data/customDataInput'
       export function fixture() {
         setActivePinia(createPinia())
         const robots = useRobotStore(), match = useMatchStore(), selection = useRobotSelectionStore(), connection = useConnectionStore()
@@ -219,12 +219,12 @@ test('old ingress files are gone and new domain, stores and UI do not import pro
     assert.equal(existsSync(new URL(`../src/${path}`, import.meta.url)), false, path)
   }
   function files(dir) { return readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? files(new URL(`${entry.name}/`, dir)) : [new URL(entry.name, dir)]) }
-  for (const file of files(new URL('../src/', import.meta.url)).filter(file => /\.(ts|vue)$/.test(file.pathname))) {
+  for (const file of ['src', 'core', 'rules'].flatMap(folder => files(new URL(`../${folder}/`, import.meta.url))).filter(file => /\.(ts|vue)$/.test(file.pathname))) {
     const source = readFileSync(file, 'utf8')
     assert.doesNotMatch(source, /from\s+['"][^'"]*(?:mqtt_data|mqtt_protocol|mqttPayloadDecoder|mqttDecoder)/, file.pathname)
     if (!file.pathname.includes('/rules/rm2026/')) assert.doesNotMatch(source, /(?:from\s+|import\()['"][^'"]*rules\/rm2026\/(?:decoder|adapter|telemetry|types|commands)/, file.pathname)
-    if (/\/src\/(?:domain|stores|contracts)\//.test(file.pathname)) assert.doesNotMatch(source, /(?:from\s+|import\()['"][^'"]*(?:rm2026|protobuf|tauri|mqtt-proto)/, file.pathname)
+    if (/\/(?:core|src\/state)\//.test(file.pathname)) assert.doesNotMatch(source, /(?:from\s+|import\()['"][^'"]*(?:rm2026|protobuf|tauri|mqtt-proto)/, file.pathname)
   }
-  assert.doesNotMatch(readFileSync(new URL('../src/api-shim.ts', import.meta.url), 'utf8'), /listen\(['"]mqtt-message/)
-  assert.doesNotMatch(readFileSync(new URL('../src/views/Dashboard.vue', import.meta.url), 'utf8'), /mqtt\.onMessage|handleMessage\(/)
+  assert.doesNotMatch(readFileSync(new URL('../src/desktop/api.ts', import.meta.url), 'utf8'), /listen\(['"]mqtt-message/)
+  assert.doesNotMatch(readFileSync(new URL('../src/pages/Cockpit.vue', import.meta.url), 'utf8'), /mqtt\.onMessage|handleMessage\(/)
 })

@@ -5,10 +5,10 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import protobuf from 'protobufjs/light.js'
 
-const proto = JSON.parse(readFileSync(new URL('../src/generated/mqtt-proto.json', import.meta.url), 'utf8'))
+const proto = JSON.parse(readFileSync(new URL('../rules/rm2026/generated/mqtt-proto.json', import.meta.url), 'utf8'))
 const root = protobuf.Root.fromJSON(proto)
 const bundle = await build({
-  entryPoints: [fileURLToPath(new URL('../src/input/rm2026RuleLifecycle.ts', import.meta.url))],
+  entryPoints: [fileURLToPath(new URL('../src/app/rm2026RuleLifecycle.ts', import.meta.url))],
   bundle: true,
   platform: 'node',
   format: 'esm',

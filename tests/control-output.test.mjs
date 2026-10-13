@@ -8,9 +8,9 @@ import protobuf from 'protobufjs/light.js'
 const bundle = await build({
   stdin: {
     contents: `
-      export { createControlSender } from '../src/output/controlSender'
-      export { createRm2026ControlRule } from '../src/rules/rm2026'
-      export { neutralOperatorInput } from '../src/contracts/OperatorInput'
+      export { createControlSender } from '../src/communication/control/controlSender'
+      export { createRm2026ControlRule } from '../rules/rm2026'
+      export { neutralOperatorInput } from '../core/contracts/OperatorInput'
     `,
     resolveDir: fileURLToPath(new URL('.', import.meta.url)), loader: 'ts'
   },
@@ -20,7 +20,7 @@ const bundle = await build({
 const { createControlSender, createRm2026ControlRule, neutralOperatorInput } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].contents).toString('base64')}`
 )
-const schema = protobuf.Root.fromJSON(JSON.parse(readFileSync(new URL('../src/generated/mqtt-proto.json', import.meta.url), 'utf8'))).lookupType('KeyboardMouseControl')
+const schema = protobuf.Root.fromJSON(JSON.parse(readFileSync(new URL('../rules/rm2026/generated/mqtt-proto.json', import.meta.url), 'utf8'))).lookupType('KeyboardMouseControl')
 const tick = () => new Promise(resolve => setImmediate(resolve))
 const input = (x, keys = ['KeyW']) => ({ ...neutralOperatorInput(), mouse: { deltaX: x, deltaY: 0, wheelSteps: 0 }, pressedKeys: keys })
 function deferred() {
@@ -157,10 +157,10 @@ test('failed publish is reported, then latest pending input can proceed', async 
 })
 
 test('capture UI and generic contracts do not encode RM2026 wire fields', () => {
-  const ui = readFileSync(new URL('../src/components/RoboControl.vue', import.meta.url), 'utf8')
+  const ui = readFileSync(new URL('../src/ui/control/RoboControl.vue', import.meta.url), 'utf8')
   assert.doesNotMatch(ui, /keyboardValue|KEYBOARD_BITS|MOUSE_Y_PROTOCOL_DIRECTION|rm2026|protobuf/)
-  const contract = readFileSync(new URL('../src/rules/types.ts', import.meta.url), 'utf8')
+  const contract = readFileSync(new URL('../core/rules/types.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(contract, /adaptor|tauri|rm2026|protobuf/)
-  const dashboard = readFileSync(new URL('../src/views/Dashboard.vue', import.meta.url), 'utf8')
+  const dashboard = readFileSync(new URL('../src/pages/Cockpit.vue', import.meta.url), 'utf8')
   assert.doesNotMatch(dashboard, /KeyboardMouseControl|keyboardValue|ROBO_CONTROL_QOS/)
 })

@@ -4,7 +4,7 @@ import path from 'node:path';
 import protobuf from 'protobufjs';
 
 const repoRoot = process.cwd();
-const jsonPath = path.join(repoRoot, 'src', 'generated', 'mqtt-proto.json');
+const jsonPath = path.join(repoRoot, 'rules', 'rm2026', 'generated', 'mqtt-proto.json');
 const protoJson = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 const root = protobuf.Root.fromJSON(protoJson);
 
@@ -27,7 +27,7 @@ function walk(dir) {
   return out;
 }
 
-const srcFiles = walk(path.join(repoRoot, 'src'));
+const srcFiles = ['src', 'core', 'rules'].flatMap(dir => walk(path.join(repoRoot, dir)));
 // Matches:
 //   topic: 'X'
 //   messageType: 'X'
@@ -91,7 +91,7 @@ if (unused.length) {
 }
 
 // Verify DEFAULT_MQTT_CONFIG.topics (subscriptions) all resolve to proto types.
-const constantsPath = path.join(repoRoot, 'src', 'components', 'Dashboard', 'constants.ts');
+const constantsPath = path.join(repoRoot, 'rules', 'rm2026', 'defaults.ts');
 if (fs.existsSync(constantsPath)) {
   const text = fs.readFileSync(constantsPath, 'utf8');
   const defaultConfigMatch = text.match(/DEFAULT_MQTT_CONFIG[\s\S]*?topics:\s*\[([\s\S]*?)\]/);

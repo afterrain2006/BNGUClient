@@ -1,4 +1,4 @@
-@import './base.css';
+@import '@/assets/base.css';
 
 :root {
   --color-background: #111827;

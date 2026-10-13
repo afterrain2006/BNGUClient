@@ -1,0 +1,36 @@
+// RM2026 connection defaults. Kept with the protocol, not the cockpit UI.
+export const DEFAULT_MQTT_CONFIG = {
+  brokerUrl: 'mqtt://192.168.12.1:3333',
+  port: 3333,
+  clientId: '',
+  username: '',
+  password: '',
+  topics: [
+    'GameStatus',
+    'GlobalUnitStatus',
+    'GlobalLogisticsStatus',
+    'GlobalSpecialMechanism',
+    'Event',
+    'RobotInjuryStat',
+    'RobotRespawnStatus',
+    'RobotStaticStatus',
+    'RobotDynamicStatus',
+    'RobotModuleStatus',
+    'RobotPosition',
+    'Buff',
+    'PenaltyInfo',
+    'RobotPathPlanInfo',
+    'RadarInfoToClient',
+    'CustomByteBlock',
+    'TechCoreMotionStateSync',
+    'RobotPerformanceSelectionSync',
+    'DeployModeStatusSync',
+    'RuneStatusSync',
+    'SentryStatusSync',
+    'DartSelectTargetStatusSync',
+    'SentryCtrlResult',
+    'AirSupportStatusSync',
+    'MapClickInfoNotify',
+    'CommonCommand'
+  ]
+}

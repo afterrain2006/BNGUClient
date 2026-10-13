@@ -1,82 +1,337 @@
-# 安装与使用指南
+# 安装与使用：一步一步跑起来
 
-本文针对当前 BNGUClient 源码，不把参考仓库、历史打包脚本或 Mock 当成已验收的赛事客户端。排错与代码调试见 [调试指南](debugging.md)。
+先在自己电脑上看到程序窗口，再用本机测试服务看到画面和数据，最后才连接真实机器人。第一次使用不需要改代码，不需要 Python 或 AI 环境。
 
-## 1. 先确定要运行什么
+本页主要按普通 Windows 10/11 的 64 位 Intel/AMD 电脑说明；Linux 在最后单独说明。ARM 电脑不要照抄 x64 下载选项，当前没有它的完整使用验证。
 
-| 目的 | 命令（仓库根目录） | 能力 |
+## 1. 先认识两个词，避免走错路
+
+- **项目根目录**：下载下来的 `BNGUClient` 文件夹，里面能同时看到 `package.json`、`src`、`src-tauri`、`rules`。不是 `src` 文件夹里面。
+- **终端**：输入命令的窗口。Windows 可以用 PowerShell；本文的 Windows 命令在 PowerShell 里执行，不是在浏览器地址栏里执行。
+
+复制命令时只复制代码框里的内容，一行一行执行。不要把教程里的 `PS C:\...>` 提示文字也复制进去。看到错误先停在该步骤，不要继续粘贴后面的命令。
+
+本文 Windows 命令使用 `npm.cmd`，它和通常见到的 `npm` 做同一件事，但能避开部分电脑上 PowerShell 不允许运行 npm.ps1 的问题。Linux 用 `npm`，不带 `.cmd`。
+
+## 2. Windows 先安装这些工具
+
+以下工具只需要安装一次。安装时需要联网，部分工具会要求管理员确认；普通启动项目不需要一直以管理员身份运行。
+
+| 工具 | 去哪里下载，怎么选 | 用来做什么 |
 | --- | --- | --- |
-| 只开发网页/UI | `npm run dev` | Vite 网页，无真实 Tauri MQTT/UDP 后端 |
-| 查看血条和模块灯场景 | `npm run dev`，再打开下方预览地址 | 独立模拟状态，不连接 Broker |
-| 运行桌面客户端 | `npm run tauri -- dev` | 启动 Vite、编译 Rust 并打开桌面窗口 |
-| 生成前端静态文件 | `npm run build` | 生成 dist，不生成 exe/安装包 |
-| 构建桌面发行程序 | `npm run tauri -- build --no-bundle` | 编译前端和 Rust，不生成安装器 |
+| Git | [Git for Windows](https://git-scm.com/downloads/win)，普通电脑选 x64 安装器；大多数选项保持默认 | 下载和更新代码 |
+| Node.js | [官方下载页](https://nodejs.org/en/download)，选择 **22.x**、Windows、x64、`.msi`；本项目本地使用 22.x 验证，不是要求你选网页上最大的版本号 | 运行项目命令；安装器会一起装 npm |
+| Microsoft C++ Build Tools | [官方安装器入口](https://visualstudio.microsoft.com/visual-cpp-build-tools/)，打开后勾选 **“使用 C++ 的桌面开发 / Desktop development with C++”**，保留其中的 MSVC 和 Windows SDK | 编译桌面程序和视频解码代码 |
+| WebView2 Runtime | [微软下载页](https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download)，找 **Evergreen Bootstrapper** 并安装；如果已装会提示 | 显示客户端窗口内容 |
+| Rust | [官方下载页](https://rust-lang.org/tools/install/)，Windows 下载并运行 rustup-init；前面的 C++ 工具装好后再装它，普通电脑使用默认 MSVC 工具链 | 编译电脑通信和视频部分 |
 
-首次只想看效果：完成 Windows 环境与依赖安装后，用桌面开发命令。没有真实机器人时再启动第 5 节的 Mock。客户端已移除 AI 检测，不需要 Python、模型或 AI 环境；内嵌 FFmpeg 也不是基础联调的前置条件。
+不确定 C++ 工具勾选项时，可对照 [Tauri 的 Windows 环境说明](https://v2.tauri.app/start/prerequisites/#windows)。不需要安装 Android Studio，也不需要安装 Python、CUDA、TensorRT 或 AI 模型。
 
-## 2. Windows 环境安装
-
-### 2.1 工具与用途
-
-1. 从 [Git 官方下载页](https://git-scm.com/downloads/win) 安装 Git，安装后确认 `git --version` 能执行。
-2. 从 [Node.js 官方下载页](https://nodejs.org/en/download) 选择 Node.js 22 分支安装（本地验证版本），包含 npm；不必额外安装全局 Vite/Tauri。
-3. 安装 Microsoft C++ Build Tools，在安装器勾选“使用 C++ 的桌面开发”，包含 MSVC 编译器和 Windows SDK。
-4. 确认安装 Microsoft Edge WebView2 Runtime；只有 Edge 浏览器本身不代表所有机器都具备所需运行时。
-5. 按 [Rust 官方安装页](https://rust-lang.org/tools/install/) 安装 rustup，选择 MSVC 工具链。
-
-C++ 工具、WebView2 和 MSVC Rust 的平台要求可核对 [Tauri 官方环境说明](https://v2.tauri.app/start/prerequisites/#windows)。本项目会编译 vendored libde265 C++ 源码，不能仅安装 Node.js。
-
-安装后重新打开 PowerShell/VS Code 的终端，执行：
+装完后关闭旧终端再打开；如果使用 VS Code，完全退出再打开，让它识别新工具。按 Windows 键，搜索 **PowerShell** 并打开，逐行输入：
 
 ```powershell
 git --version
 node --version
-npm --version
-rustup show active-toolchain
+npm.cmd --version
 rustc --version
 cargo --version
+rustup show active-toolchain
 ```
 
-Windows 工具链名称应包含 `pc-windows-msvc`。如果已有 Rust 太旧，使用 `rustup update stable`；如果选了 GNU 工具链，按 Tauri 说明切换为 `stable-msvc`。本次本地验证 Rust 1.98.0，不承诺更低版本全部兼容。
+成功时每条都有版本信息，最后一条通常包含 `x86_64-pc-windows-msvc`。如果提示“无法识别”，先重新打开终端；还不行就检查对应工具是否装成功。Rust 用错工具链时，按官方说明执行 `rustup default stable-msvc`。如果提示 Rust 太旧，可执行 `rustup update stable` 后重试，不要修改项目文件绕过错误。
 
-### 2.2 克隆与依赖
+## 3. 下载代码，打开正确文件夹
 
-在准备放项目的父目录运行：
+### 第一次下载
+
+在刚打开的 PowerShell 逐行执行：
 
 ```powershell
+Set-Location $env:USERPROFILE
 git clone https://github.com/afterrain2006/BNGUClient.git
-cd BNGUClient
-npm ci
-npm run check
+Set-Location .\BNGUClient
+Get-Location
+Test-Path .\package.json
 ```
 
-`npm ci` 按 package-lock 安装依赖；`check` 依次做类型检查、客户端回归测试和协议引用校验。首次安装需要联网下载 npm/Cargo 依赖，首次 Rust 编译也会较慢。
+这会把项目下载到你的个人文件夹，例如 `C:\Users\张三\BNGUClient`。`$env:USERPROFILE` 会自动换成你自己的位置，不需要把“张三”照抄进去。最后一条应显示 **True**。
 
-已经有工作目录时不要再次在里面 clone；先用 `git status`、`git remote -v` 确认目录与本地改动，再决定是否更新。不要为了更新执行 `git reset --hard`。
+如果 `git clone` 提示目标目录已经存在，不要删除它，也不要在里面再次下载。改为打开已有项目，先检查它是不是正确仓库。
 
-当前源码不再包含 AI 源码发行包，不需要 Git LFS 或额外 Python 环境即可运行客户端。
+### 已经有项目
 
-### 2.3 启动真正的客户端
-
-在仓库根目录运行：
+在资源管理器打开你的项目文件夹，点击顶部地址栏，输入 `powershell` 并按回车。也可以在 PowerShell 使用实际路径，例如：
 
 ```powershell
-npm run tauri -- dev
+Set-Location 'D:\projects\BNGUClient'
+Test-Path .\package.json
+git remote -v
 ```
 
-等待终端完成 Rust 编译并打开桌面窗口。此命令自动启动 Vite，不要同时另开一个 `npm run dev` 占用 1420 端口。调试时保持终端开启；关闭程序可使用客户端退出功能，结束开发命令用 Ctrl+C。
+`D:\projects\BNGUClient` 只是路径示例，电脑没有 D 盘就换成你自己的位置。`origin` 应指向 `afterrain2006/BNGUClient`。不要打开参考原项目 `JNU-SHARK/SharkClient` 或其他旧副本。
 
-窗口默认全屏；基础遥测没有连接时灰灯/等待数据不代表客户端启动失败。
+用 VS Code 时，选择 **文件 → 打开文件夹**，打开整个 `BNGUClient`，再选 **终端 → 新建终端**。不是只打开一个 `.vue` 文件。
 
-## 3. Linux 环境
+## 4. 第一次启动真正的客户端
 
-以 Ubuntu/Debian 系为例。需要 Git、Node.js/npm、stable Rust 与图形桌面环境。系统依赖与现有 CI 保持一致：
+确认上一步 `Test-Path .\package.json` 为 True，逐行执行：
+
+```powershell
+npm.cmd ci
+npm.cmd run check
+npm.cmd run tauri -- dev
+```
+
+| 命令 | 正在做什么 | 什么时候进入下一步 |
+| --- | --- | --- |
+| `npm.cmd ci` | 下载项目需要的组件 | 回到可以输入命令的提示行，且没有以错误结束 |
+| `npm.cmd run check` | 检查代码、自动测试和协议文件 | 检查通过且没有失败测试 |
+| `npm.cmd run tauri -- dev` | 编译并打开桌面客户端 | 等桌面窗口出现；这个命令运行中不回到提示行是正常的 |
+
+第一次编译会比较慢，中途显示 `Downloading` 或 `Compiling` 不代表卡死。出错时看第一条报错，见 [排错说明](debugging.md)。
+
+窗口默认全屏。看到“等待图传接入”、数据为 `—` 或“未连接”，说明程序已打开，只是还没接数据。**不要关闭这个终端**，关闭会结束开发运行。也不要另开 `npm run dev`，那会和它抢用同一个网页端口。
+
+只有浏览器页面、没有桌面窗口？通常是启动成了 `npm run dev`。停止它后用上面的 `npm.cmd run tauri -- dev`。
+
+## 5. 没有机器人也能测试
+
+下面的 Mock 是“本机测试服务”：让这台电脑假扮机器人，发送变化的数据和循环测试画面。不需要裁判系统或真实电控，也不验证真实机器人的动作。
+
+### 5.1 再打开一个终端，启动测试服务
+
+客户端的第一个终端保持运行。再开第二个 PowerShell，进入**同一个项目根目录**。按第 3 节第一次下载的位置，命令是：
+
+```powershell
+Set-Location "$env:USERPROFILE\BNGUClient"
+npm.cmd ci --prefix tools/rm2026-mock-server
+npm.cmd run dev --prefix tools/rm2026-mock-server
+```
+
+如果项目在其他位置，第一行换成实际路径。不要只复制后两行，却留在一个不相关的文件夹。
+
+看到以下内容就说明服务已启动：
+
+```text
+Broker listening on 127.0.0.1:3333
+UDP Video:
+127.0.0.1:3334
+```
+
+随后会不断显示 `[STATS]`，那是正常的运行记录，不是报错。两个终端都保持开启。测试视频在 `tools/rm2026-mock-server/assets/test.h265`，仓库已附带；文件存在时不需要另装 FFmpeg。
+
+### 5.2 客户端先连接状态数据
+
+1. 点击客户端窗口，按 **Esc** 打开菜单。
+2. 点击 **操作中心 → 连接配置**。会弹出标题为“图传设置”的窗口。
+3. 点顶部的 **网络** 标签，按表格填写。窗口内容可以向下滚动。
+
+| 界面上的名字 | 填写内容 | 注意 |
+| --- | --- | --- |
+| 机器人连接 → IP 地址 | `127.0.0.1` | 只填地址，不带 `mqtt://` |
+| UDP 图传设置 → 监听端口 | `3334` | 这是视频端口，不是下面的数据端口 |
+| 编码类型 | 自动检测 | 第一次不用改缓冲区大小 |
+| MQTT 通信 → MQTT 端口 | `3333` | 先填 IP，再填这里 |
+| MQTT 通信 → Broker 地址 | 应显示 `mqtt://127.0.0.1:3333` | 这是完整地址，和最上面的 IP 框格式不同；最后核对一次 |
+| Client ID | `3` | 只填数字 3，不填随机字符串或 `003` |
+| 用户名 | 留空 | 本机服务不要求用户名 |
+
+程序的视频监听地址默认是 `0.0.0.0`，意思是从本机网卡接收；不需要在菜单中找一个框再填它，也不要把最上面的 IP 改成这个值。
+
+4. 点击 **Broker 地址右边的“连接”**，不是底部的“应用并连接”。如果已有旧连接，先点它旁边的“断开”，再按本表填写并连接。
+5. 在“MQTT 通信”区域确认状态变为 **已连接**，并且“已接收”条数持续增加。
+
+MQTT 这里负责状态数据和控制消息；视频是另一条 UDP 通道。只有 MQTT 已连接，不代表视频已经连接。
+
+### 5.3 选对显示机器人，再连接视频
+
+1. 在同一个设置窗口点 **机器人** 标签。
+2. 在 **机器人型号** 下拉框选择 **红方3号步兵**。这不是“性能模式”选项。
+3. 点 **视频源** 标签，选择 **UDP**。
+4. 点击窗口底部 **应用并连接**。
+5. 等待循环测试画面出现。按 Esc 返回操作视野；如果先退出的是设置弹窗，再按一次 Esc 才会开操作菜单。
+
+现在应能看到测试画面、当前血量和变化的数据。如果血量还是 `—`，先核对你选择的是红方3号步兵，而不是默认的红方1号英雄。
+
+**两个机器人设置不要混淆：** `Client ID = 3` 决定这次连接的身份；下拉框选择红方3号步兵决定屏幕显示谁。只改下拉框不会替你修改 Client ID。
+
+### 5.4 检查键鼠输入有没有发出去
+
+1. 返回视频视野，点击底部 **启用键鼠控制**。
+2. 按住 W 一小会儿再松开，或移动鼠标。不要连接实机做这一段测试。
+3. 看第二个终端，应出现 `RX CONTROL` / `KeyboardMouseControl`。
+4. 打开 `tools/rm2026-mock-server/metrics/runtime.json`，最近命令里按住 W 时应出现 `keyboardValue: 1`，松开后为 `0`。文件会自动更新，不要手动修改。
+5. 再按住 W，按 Esc 打开菜单。菜单打开后应释放按键；关菜单后不会自动重新控制，要再次点“启用键鼠控制”。
+
+点击第二个终端会让客户端失去焦点，控制也会暂停，这是预期行为。回到客户端需要重新启用。
+
+### 5.5 什么算测试成功
+
+- 能看到循环测试视频。
+- 红方3号步兵的状态有数据，消息条数增加。
+- 启用控制后，测试服务能收到按键；松开后键位回到 0。
+- 打开菜单不会断开画面，但会停止操控。
+
+**模块灯灰色不算失败。** 这个测试服务不发送 `RobotModuleStatus`（模块状态报告）。要单独看灯的各种状态，见 [状态灯预览说明](../tools/robot-state-preview/README.md)。
+
+测试服务只在本机监听，不需要改静态 IP、打开路由器端口或关闭防火墙。端口被占用时，见 [端口占用处理](debugging.md#5-提示端口被占用了)。
+
+### 5.6 关闭程序，下次再开
+
+客户端按 **Esc → 系统设置 → 退出客户端 → 确定**。然后回到两个终端，分别按 **Ctrl+C** 停止命令。
+
+下次不需要重新下载代码；进入项目根目录后，第一个终端运行 `npm.cmd run tauri -- dev`，第二个终端运行 `npm.cmd run dev --prefix tools/rm2026-mock-server`。连接参数要重新确认；不要假定所有输入框都会自动保存。
+
+## 6. 平时怎么用菜单
+
+| 你要做什么 | 点击或按什么 |
+| --- | --- |
+| 打开/关闭菜单 | Esc，或者右上角“菜单” |
+| 设置 IP、数据端口和视频端口 | 操作中心 → 连接配置 → 网络 |
+| 选择看哪台机器人的数据 | 连接配置 → 机器人 → 机器人型号 |
+| 选择 UDP 视频来源 | 连接配置 → 视频源 |
+| 看收到的数据、导出状态文件 | 菜单左侧“遥测” → 导出状态快照 |
+| 看自定义原始字节 | 菜单左侧“自定义数据” |
+| 调整血条、小地图等面板 | HUD 工作台，完成后点“完成编辑” |
+| 切回简洁面板 | 操作中心 → 使用紧凑 HUD |
+| 收起两侧状态面板 | F10，再按恢复 |
+| 切换全屏 | F11；可在系统设置打开/关闭 |
+| 打开内部排错窗口 | 系统设置打开“调试模式”，再按 F12 |
+| 临时把鼠标还给桌面 | 已启用控制时按住 Backspace；松开可能恢复控制。想持续暂停，用 Esc 菜单 |
+
+Ctrl+1/2/3/4 可直接打开操作中心/遥测/自定义数据/系统设置。输入框正在打字时不会执行这些跳转。
+
+遥测导出的是当前状态 JSON 文件，通过系统下载功能保存；是否弹出保存位置由系统决定。不是录像，也不能靠它回放整场比赛。血量趋势最多记 120 个采样点，切换机器人或重新连接后清空。
+
+## 7. 配置文件在哪里，改了为什么没生效
+
+**只改连接地址时，用客户端设置窗口，不需要编辑下面的文件。** 以下是维护机器人列表、面板等内容时才需要的位置。
+
+表里的路径从项目根目录算起。例如项目在 `D:\projects\BNGUClient`，`resources/RobotConfig.yaml` 就是 `D:\projects\BNGUClient\resources\RobotConfig.yaml`。用资源管理器打开，或用 VS Code 打开后修改。
+
+| 文件或文件夹 | 里面是什么 | 什么时候需要改 |
+| --- | --- | --- |
+| `resources/RoboSelect.yaml` | 机器人下拉框里的名字列表 | 增减显示选项 |
+| `resources/RobotConfig.yaml` | 名字对应的机器人 ID、类型，以及自定义数据格式文件的路径 | 和上面的名字列表一起调整 |
+| `resources/HUDPanel/` | 血条、小地图等面板模板 | 调整自定义面板；优先用工作台操作 |
+| `resources/DashboardConfig/` | 保存的面板位置、大小等布局 XML | 在“视频源 → 界面配置”中保存/选择 |
+| `resources/CustomElement/` | 绘图和装饰模板 | 调整绘图模板 |
+| `resources/CustomByteBlockConfigs/` | 电控自定义数据的样例文件 | 最终协议确定后再由开发者修改，目前解析未完成 |
+| `resources/MessageMQTTConfig.yaml` | 消息显示的配置 | 调整现有消息面板 |
+| `rules/rm2026/proto/messages.proto` | RM2026 消息的正式格式定义 | 只有协议变更时才改，普通连接不用改 |
+| `rules/rm2026/defaults.ts` | 新启动时使用的默认 MQTT 地址和订阅列表 | 开发者改默认值；临时连接直接改菜单 |
+
+例如列表中的 `红方3号步兵`，在 `RoboSelect.yaml` 和 `RobotConfig.yaml` 中名字要完全一致，不能多空格。YAML 用空格缩进，不要用 Tab。不要把样例注释中的宽泛 ID 范围当成程序支持范围；当前连接只接受 1～11 或 101～111，具体用哪个编号按实际设备确认。
+
+### “保存配置”不是保存网络参数
+
+“视频源 → 界面配置 → 保存配置/另存为”保存的是面板位置、大小和显示设置，**不保存 MQTT 地址、Client ID 和 UDP 端口**。重开程序后先检查网络页，不能因为保存过布局就跳过连接设置。
+
+### 源码和运行副本不要改混了
+
+程序优先使用它找到的运行资源文件夹；如果 exe 旁边已有 `resources` 或旧打包方式的 `_up_/resources`，修改项目根目录的另一份可能不会生效。打包时也可能复制资源，源码和运行副本不保证是同一份。
+
+开发者可在项目根目录用下面的命令找常见副本：
+
+```powershell
+Get-ChildItem -Path .\resources, .\src-tauri\target\debug -Filter RobotConfig.yaml -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
+```
+
+修改前先备份文件。确认正在运行哪一份程序后，再改它实际使用的资源。改完关闭客户端并重新启动；不要依赖“重新加载界面”按钮，该按钮当前未完成，也不要假定每个 XML/YAML 都会立即刷新。
+
+### 临时设置放在哪里
+
+默认在 **exe 所在文件夹的 `Cache`** 中。例如：
+
+- 开发运行或调试构建：`src-tauri/target/debug/Cache/`。
+- 正式构建：`src-tauri/target/release/Cache/`。
+- `Cache/settings.json`：通过桌面设置接口保存的内容，不是全部设置的总表。
+- `Cache/WebView/`：界面保存的快捷键、调试开关、HUD 呈现偏好等；不要手工编辑里面的数据库。
+
+开发版和正式版的 exe 不同，可能使用不同的 Cache。设置过 `BNGUCLIENT_CACHE_DIR` 时以该位置为准。排错时先备份并找准具体设置，**不要上来就删除整个 Cache 或项目文件夹**。
+
+## 8. 改成连接真实机器人
+
+先完成第 5 节本机测试，再由负责现场网络和电控的人给你以下信息：
+
+| 要问清楚什么 | 客户端哪里填写 |
+| --- | --- |
+| 状态数据服务器的地址和端口 | 网络页 IP、MQTT 端口；核对 Broker 完整地址 |
+| 本机机器人的编号 | Client ID，不是机器人下拉框 |
+| 是否需要用户名或密码 | 网络页可填用户名；当前页面没有密码输入框，需要密码时先让维护者确认配置办法，不要假定匿名连接可用 |
+| 视频从哪台设备发来 | 本地测试 IP 换成实际来源；当前统一 IP 同时影响视频来源过滤 |
+| 视频要发给你电脑的哪个 IP 和端口 | 由视频发送端配置；端口要与客户端 UDP 监听端口一致 |
+
+1. 停止本机测试服务。
+2. 接入指定网络，在网络页把 `127.0.0.1` 改成实际地址。
+3. 按实际要求填 MQTT 端口和 Client ID，断开旧连接后重新连接。
+4. 在机器人下拉框选对应的显示对象。
+5. 确认视频发送目标是**运行客户端这台电脑的 IP**，不是状态服务器的 IP。必要时在 PowerShell 运行 `ipconfig`，让网络负责人确认哪张网卡的 IPv4 地址才对。
+6. 再点“应用并连接”，先检查画面和状态，不急着启用操控。
+
+如果状态服务器和视频来源不是同一台设备，需分别核对 Broker 地址和视频来源设置；不要假定改一个 IP 就完成所有连接。源码默认地址 `192.168.12.1:3333` 只是预设，不是所有现场都通用。
+
+不要擅自关闭防火墙、开放全部端口或照抄陌生静态网卡设置。第一次试操控前，先架空机器人或禁用危险执行机构，由电控人员确认松键和断线保护。完整清单见 [上机前检查](development-handoff.md)。
+
+## 9. 更新代码、生成 exe 和安装包
+
+### 更新已有项目
+
+先关闭正在运行的客户端和开发命令。在项目根目录：
+
+```powershell
+git status
+git remote -v
+```
+
+确认 `origin` 是 `afterrain2006/BNGUClient`。如果 `git status` 显示本地改动，先备份或提交自己的修改，不要继续更新来覆盖它。如果没有本地改动，再执行：
+
+```powershell
+git pull --ff-only origin main
+npm.cmd ci
+npm.cmd run check
+npm.cmd run tauri -- dev
+```
+
+如果 Git 提示不能快进或存在冲突，停下来处理，不要使用 `git reset --hard`。更新源码不会改变已经编译好的旧 exe；要么重新用开发命令启动，要么重新构建。
+
+### 生成能独立打开的程序
+
+项目根目录执行：
+
+```powershell
+npm.cmd run check
+npm.cmd run build:desktop
+```
+
+成功后 Windows 程序在 **`src-tauri/target/release/BNGUClient.exe`**。可以从项目根目录运行：
+
+```powershell
+& .\src-tauri\target\release\BNGUClient.exe
+```
+
+调试版命令是 `npm.cmd run tauri -- build --debug --no-bundle`，输出在 `src-tauri/target/debug/BNGUClient.exe`。不要把 debug 和 release 两份旧新程序弄混。
+
+这些构建会把网页内容放进程序，不需要再启动 Vite；但不等于只复制 exe 就能发给任何人。程序仍需要正确的运行环境和资源文件。
+
+需要 Windows 安装包时执行 `npm.cmd run build:installer`，安装器输出目录为 `src-tauri/target/release/bundle/nsis/`。生成安装包不代表已在干净电脑测试通过。`npm.cmd run build` 只输出 `dist` 网页文件，不产生 exe。
+
+## 10. Linux 用户
+
+下面按有图形桌面的 Ubuntu/Debian 系说明；在 Linux 终端执行，不要在 Windows PowerShell 执行。其他发行版看 [Tauri 官方系统依赖说明](https://v2.tauri.app/start/prerequisites/#linux)。
+
+先装 Git、Node.js 22.x、npm 和 stable Rust。Node/Rust 从第 2 节的官方入口按 Linux 指引安装；再装桌面编译依赖：
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential pkg-config \
+sudo apt-get install -y git build-essential pkg-config \
   libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
   libjavascriptcoregtk-4.1-dev librsvg2-dev patchelf
+```
+
+进入你要保存代码的文件夹，再执行：
+
+```bash
 git clone https://github.com/afterrain2006/BNGUClient.git
 cd BNGUClient
 npm ci
@@ -84,134 +339,8 @@ npm run check
 npm run tauri -- dev
 ```
 
-Node.js 与 Rust 的安装分别参考其官方安装页，发行版 apt 自带版本可能较旧。不要将 Windows 的 node_modules 或 target 直接复制给 Linux。无图形界面的 SSH/容器可做检查，但不能据此认定桌面窗口能显示。
+第二个终端进入同一个 `BNGUClient` 文件夹，运行 `npm ci --prefix tools/rm2026-mock-server` 和 `npm run dev --prefix tools/rm2026-mock-server`。界面参数按第 5 节填写。
 
-其他发行版的平台依赖见 [Tauri Linux 说明](https://v2.tauri.app/start/prerequisites/#linux)。本指南不承诺所有发行版或 WSL 显示/视频驱动组合均已验收。
+构建用 `npm run build:desktop`，输出为 `src-tauri/target/release/BNGUClient`。Linux 安装包可用 `npm run tauri -- build --bundles deb,appimage`，输出在同级 `bundle` 文件夹下。
 
-## 4. 客户端界面与基本操作
-
-默认是常驻图传视野，状态面板位于画面边缘。按 **Esc** 或点击右上角“菜单”进入操作中心，访问遥测、自定义数据和系统设置；切换工具页不会卸载图传或停止遥测。
-
-注意两处设置的区别：操作中心“连接配置 / 视频与显示”打开 Dashboard 的网络、机器人与图传设置；左侧“系统设置”用于全屏快捷键、调试模式与退出客户端。
-
-复杂布局、绘图、已有 XML/YAML 面板在“HUD 工作台”保留。点击“完成编辑”或按 Esc 退出后会使用自定义 HUD 继续操作，并不只在编辑时显示。操作中心可在“使用紧凑 HUD / 使用自定义 HUD”间切换，偏好会保存；默认紧凑面板不会覆盖已保存的自定义布局。F10 专注模式也可以收起自定义 HUD。
-
-### 4.1 设置连接身份
-
-1. 按 Esc，在操作中心点击“连接配置”（原 P 快捷键仍可直接打开 Dashboard 设置）。
-2. “机器人连接 → IP 地址”填 MQTT 服务/图传源地址；这个输入框填 IP 或主机名，不填完整 `mqtt://...`。
-3. MQTT 端口填实际端口，Client ID 填数字机器人 ID，如 `3` 或 `103`；用户名按服务端要求填写。
-4. 点击 MQTT 连接，观察连接状态。仅发出连接请求不等于连接已建立。
-5. 修改 IP/端口或 Client ID 后按提示断开并重新连接；修改输入框不会让旧连接自动变成新身份。
-6. 在机器人选项中选择要查看的机器人。UI 选择不会改变本机 MQTT 身份，也不会把消息重定向到所选机器人。
-
-本机身份来自连接的 Client ID。StaticStatus 用于校验并更新静态信息；若与连接身份不符，规则 warning 并忽略该静态更新，不静默切换身份。
-
-### 4.2 默认界面快捷键
-
-| 按键 | 作用 |
-| --- | --- |
-| Esc | 打开/关闭操作菜单；有弹窗或编辑操作时优先退出当前层 |
-| Ctrl+1 / 2 / 3 / 4 | 操作中心 / 遥测 / 自定义数据 / 系统设置 |
-| F10 | 专注模式，收起或恢复两侧状态面板 |
-| P | 打开/关闭 Dashboard 设置菜单 |
-| 按住 Backspace | 暂时退出键鼠捕获；松开后满足条件会恢复，不是持久暂停开关 |
-| F7 | 准星设置 |
-| F8 / H | 打开弹丸购买 / 远程补弹菜单，不等于请求已经执行 |
-| +（Equal）/ - / Delete | 视频放大 / 缩小 / 恢复 |
-| F11 | 全屏切换（需系统设置中的相应开关启用） |
-| F12 | 打开 DevTools（需系统设置中启用调试模式） |
-
-连接后**必须主动点击“启用键鼠控制”**，不再自动捕获。打开菜单、进入编辑、窗口失焦、断线或连接身份变化会释放控制；返回视野和重连均不会自动启用。按住 Backspace 只是已启用控制中的临时释放，持久释放请用 Esc 菜单。浏览器可能需要用户点击后才允许指针锁定；没有锁定并不一定停止软捕获。
-
-Dashboard 的旧快捷键仍可在键位页修改。Esc、Ctrl+1…4、F10 是工作区快捷键；输入框编辑时不执行工具页跳转或专注切换。
-
-### 4.3 遥测与导出
-
-遥测页使用与 HUD 相同的新 Store，不再显示随机模拟机器人。模块灯区分有效、过期和等待报告；只在收到新鲜血量报告时每秒最多采样一次，保留最近 120 点，切换机器人或连接后清空。采样页首次打开前不记录，不是完整报文历史。
-
-“导出状态快照”下载 JSON，包含当前机器人/比赛状态、连接元数据和血量采样，不包含 MQTT 密码。它不包含原始 MQTT 报文、视频或自定义图片，也不提供回放。
-
-当前 RM2026 规则转发 W/S/A/D、Shift、Ctrl、Q/E/R/F/G/Z/X/C/V/B 和鼠标输入。这里仅定义输入编码，不决定机器人动作；K 键操作菜单中仍有占位项。
-
-连接实机前先禁用执行机构或架空测试，确认松键、失焦和失联超时保护。中立帧可能丢失，不是安全停车保证。
-
-## 5. 无硬件本地联调
-
-### 5.1 两个终端分别启动
-
-终端 A，仓库根目录：
-
-```powershell
-npm run tauri -- dev
-```
-
-终端 B，也从仓库根目录开始：
-
-```powershell
-cd tools/rm2026-mock-server
-npm ci
-npm run dev
-```
-
-Mock 的依赖独立安装；根目录 npm ci 不会安装工具子项目依赖。仓库附有 HEVC 测试码流；只有码流缺失或要重新生成时才需要系统 FFmpeg。
-
-### 5.2 填入本地参数
-
-| 参数 | 本地 Mock 设置 |
-| --- | --- |
-| Dashboard 的 IP 地址 | `127.0.0.1` |
-| MQTT 端口 | `3333` |
-| Client ID | `3` |
-| 用户名 | 留空 |
-| UDP 监听端口 | `3334` |
-| UDP 编码 | 自动检测或 H.265 |
-| UI 选择 | 红方 3 号步兵 |
-
-程序默认 UDP 监听地址是 `0.0.0.0`，不是远程视频服务器地址。Dashboard 的统一 IP 还用于图传来源过滤，本地测试应设为 127.0.0.1。
-
-先连接 MQTT，再在图传设置选择 UDP 并启动视频接收。预期看到变化的比赛/机器人数据与循环测试图。返回视野，点击“启用键鼠控制”后再移动鼠标或按键，Mock 终端会输出 `RX CONTROL`、`KeyboardMouseControl` 及解码字段；可在 Mock 的 `metrics/runtime.json` 查看最近控制和发送统计。验证按住 W 时打开 Esc 菜单会发送中立帧，关菜单后不会自动捕获。中立帧不是实机安全停车保证。
-
-Mock 当前只发布六类遥测，**不发布 RobotModuleStatus**。因此看到变化的血量但模块灯等待/灰色是正常的，不能据此推断模块灯故障。需要全面验模块灯，用第 5.3 节。
-
-不要用 Client ID 103 接当前红方 3 号场景再把不匹配 warning 当作程序损坏。不要同时启动内置 Broker 占用 Mock 的 3333 端口。Mock 默认仅绑定 loopback，无认证，不应暴露到公共网络。
-
-### 5.3 专门验证血条与模块灯
-
-停止桌面开发命令后，在根目录运行 npm run dev，浏览器打开：
-
-```text
-http://localhost:1420/tools/robot-state-preview/?scenario=live
-http://localhost:1420/tools/robot-state-preview/?clientId=103&scenario=recovered
-```
-
-预览支持 missing、live、zero、timeout、disconnected、reconnected、recovered 七种场景，直接注入模拟协议消息，不连接 MQTT。它验证状态呈现，不验证真实网络或视频。
-
-## 6. 切换到实际设备
-
-1. 停止本地 Mock，不再使用 127.0.0.1 作为实机地址。
-2. 连接对应网络，确认本机网卡配置与服务端要求；仓库预设的 MQTT 地址为 192.168.12.1:3333，但现场以实际配置为准。
-3. 设置对应机器人 Client ID，重新连接；确认 UI 查看对象与预期一致。
-4. 视频发送目标必须是这台客户端机器的可达地址与 UDP 3334，不能误填 Broker 的地址。
-5. 验证血量/模块/位置、红蓝映射与断线重连；再按 [现场清单](development-handoff.md#现场联调清单) 测试操控和保护。
-
-不要在本地联调阶段随意修改机器的静态网卡配置。跨机器测试需要改 Mock 的绑定/目标地址，按其参数说明操作；不要为了测试开放所有端口或关闭防火墙。
-
-## 7. 构建、更新与可选功能
-
-在根目录运行：
-
-```powershell
-npm run check
-npm run tauri -- build --no-bundle
-```
-
-Windows 默认生成 `src-tauri/target/release/BNGUClient.exe`，Linux 为同目录下无 .exe 后缀的二进制。也可用 `npm run build:desktop` 执行不打包构建。无 bundle 的 exe 不等于自包含便携包，资源查找和依赖仍须核对，不要只复制一个 exe 就承诺可部署。
-
-需要 Windows 安装器时，用 `npm run build:installer`；Linux 用 `npm run tauri -- build --bundles deb,appimage`。历史 lite/mini/single 和依赖 AI 的 Flatpak 打包脚本已移除。发布安装包前还应做干净机器验收。
-
-产品名为 BNGUClient，应用标识为 `io.github.afterrain2006.bnguclient`。日志、缓存和视频配置使用 `BNGUCLIENT_` 环境变量，界面偏好使用 `bnguclient.` 设置键。旧应用偏好不会自动导入，旧缓存也不会自动删除；升级后重新确认连接参数和快捷键。
-
-修改前端代码通常有 Vite 热更新；Rust 修改需要重新编译；资源 XML/YAML 不应假设每处都自动重读，必要时重新加载配置或重启。修改 MQTT proto 后运行 generate:mqtt-proto 和 verify:mqtt-proto，提交生成 JSON。
-
-外部 FFmpeg 可用 `BNGUCLIENT_FFMPEG_PATH` 指定，internal-ffmpeg 是可选视频构建方式，与 AI 无关。电控自定义字节解析和图片重组尚未完成，详见 README“已知边界”，不能通过安装额外依赖让占位函数自动可用。
+不要把 Windows 的 `node_modules` 或 `target` 复制给 Linux。只有命令行、没有桌面的 SSH/容器不能用来证明客户端窗口和视频可用；不同 Linux 驱动组合仍需实际测试。

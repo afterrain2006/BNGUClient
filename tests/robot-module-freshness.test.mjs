@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 
 const bundle = await build({
-  entryPoints: [fileURLToPath(new URL('../src/composables/useFreshnessClock.ts', import.meta.url))],
+  entryPoints: [fileURLToPath(new URL('../src/telemetry/useFreshnessClock.ts', import.meta.url))],
   bundle: true,
   platform: 'node',
   format: 'esm',

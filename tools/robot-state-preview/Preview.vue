@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
 import * as protobuf from 'protobufjs/light'
-import RobotStateManager from '../../src/components/Dashboard/RobotStateManager.vue'
-import { useRobotStore } from '../../src/stores/robotStore'
-import { useRobotSelectionStore } from '../../src/stores/robotSelectionStore'
-import { useMatchStore } from '../../src/stores/matchStore'
-import { createRm2026RuleLifecycle } from '../../src/input/rm2026RuleLifecycle'
-import type { MqttRule } from '../../src/rules/types'
-import mqttProto from '../../src/generated/mqtt-proto.json'
+import RobotStateManager from '@/ui/cockpit/RobotStateManager.vue'
+import { useRobotStore } from '@/state/telemetry/robotStore'
+import { useRobotSelectionStore } from '@/state/ui/robotSelectionStore'
+import { useMatchStore } from '@/state/telemetry/matchStore'
+import { createRm2026RuleLifecycle } from '@/app/rm2026RuleLifecycle'
+import type { MqttRule } from '@core/rules/types'
+import mqttProto from '@rules/rm2026/generated/mqtt-proto.json'
 
 const params = new URLSearchParams(location.search)
 const robotId = Number(params.get('clientId') ?? 3)

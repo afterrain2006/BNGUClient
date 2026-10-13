@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 
 const bundle = await build({
-  entryPoints: [fileURLToPath(new URL('../src/input/mqttRuleRunner.ts', import.meta.url))],
+  entryPoints: [fileURLToPath(new URL('../src/communication/mqtt/mqttRuleRunner.ts', import.meta.url))],
   bundle: true,
   platform: 'node',
   format: 'esm',
@@ -13,13 +13,13 @@ const bundle = await build({
   plugins: [{
     name: 'mock-mqtt-runner-boundaries',
     setup(builder) {
-      builder.onResolve({ filter: /^@\/adaptor\/tauri\/mqttAdapter$/ }, () => ({
+      builder.onResolve({ filter: /^@\/communication\/mqtt\/mqttAdapter$/ }, () => ({
         path: 'mqtt-adapter', namespace: 'mock'
       }))
-      builder.onResolve({ filter: /^@\/stores\/robotStore$/ }, () => ({
+      builder.onResolve({ filter: /^@\/state\/telemetry\/robotStore$/ }, () => ({
         path: 'robot-store', namespace: 'mock'
       }))
-      builder.onResolve({ filter: /^@\/stores\/(matchStore|connectionStore|customDataStore)$/ }, args => ({
+      builder.onResolve({ filter: /^@\/state\/telemetry\/(matchStore|connectionStore|customDataStore)$/ }, args => ({
         path: args.path.split('/').pop(), namespace: 'mock'
       }))
       builder.onLoad({ filter: /.*/, namespace: 'mock' }, ({ path }) => ({

@@ -21,9 +21,11 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@core/*": ["core/*"],
+      "@rules/*": ["rules/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"],
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "core/**/*.ts", "rules/**/*.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

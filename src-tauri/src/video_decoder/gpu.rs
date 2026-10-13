@@ -118,14 +118,6 @@ fn push_root_ffmpeg_candidates(
                 .join(platform_dir)
                 .join(binary_name),
         );
-        push_candidate(
-            candidates,
-            root.join("UDP-MQTT Server")
-                .join("node_modules")
-                .join("@ffmpeg-installer")
-                .join(platform_dir)
-                .join(binary_name),
-        );
     }
 }
 

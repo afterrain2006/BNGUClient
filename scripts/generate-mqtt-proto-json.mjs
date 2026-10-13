@@ -4,8 +4,8 @@ import process from 'node:process';
 import protobuf from 'protobufjs';
 
 const repoRoot = process.cwd();
-const protoPath = path.join(repoRoot, 'UDP-MQTT Server', 'proto', 'messages.proto');
-const outputPath = path.join(repoRoot, 'src', 'generated', 'mqtt-proto.json');
+const protoPath = path.join(repoRoot, 'rules', 'rm2026', 'proto', 'messages.proto');
+const outputPath = path.join(repoRoot, 'rules', 'rm2026', 'generated', 'mqtt-proto.json');
 
 const source = fs.readFileSync(protoPath, 'utf8').replace(/\r\n/g, '\n');
 const root = protobuf.parse(source).root;

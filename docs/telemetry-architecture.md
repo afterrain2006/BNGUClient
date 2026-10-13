@@ -1,124 +1,119 @@
-# Client telemetry after the old-chain migration
+# 程序怎样工作
 
-There is one MQTT telemetry ingress. Dashboard no longer owns decoding or message
-dispatch. Runtime adapters normalize transport data; RM2026-specific decoding and
-mapping are private to `src/rules/rm2026/`.
+这份说明给想理解或修改代码的人看。只想运行客户端，先看 [安装与使用指南](installation-and-usage.md)。
 
-```mermaid
-flowchart TD
-    Rust[Rust MQTT] --> Transport[Tauri mqttAdapter]
-    Transport --> Raw[RawMqttMessage]
-    Raw --> Runner[mqttRuleRunner]
-    Runner --> Rule[RM2026 Rule]
-    Rule --> Updates[ClientUpdate array]
-    Updates --> Robots[RobotUpdate → robotStore → RobotState]
-    Updates --> Match[MatchUpdate → matchStore → MatchState]
-    Updates --> Custom[CustomDataUpdate → customDataInput → customDataStore]
-    Robots --> UI[Dashboard UI]
-    Match --> UI
-    Custom --> UI
-    Selection[robotSelectionStore: UI selection] --> UI
+先记住一句话：**电脑收数据，规则解释数据，程序保存结果，界面显示结果。** 键鼠发送和视频显示是另外两件事，不全塞进一个模块。
+
+## 1. 为什么把规则单独放在最外层
+
+比赛会规定“第几个字节是什么意思”“机器人编号怎样分红蓝队”“W 键用哪个数字表示”。这些规定会随比赛或队伍协议变化，所以集中放在 `rules/rm2026`。
+
+程序内部仍用容易理解的字段，例如当前血量、剩余弹量、鼠标移动和按下的键。界面不需要到处记住协议里的特殊数字。
+
+`core` 只规定这些共用数据长什么样；`src` 负责客户端如何使用它们。箭头表示使用对方的代码：
+
+```text
+客户端 src ───→ 具体规则 rules ───→ 共用定义 core
+     └─────────────────────────→ core
 ```
 
-## Boundaries
+规则不能反过来引用客户端内部文件。自动测试会检查这一点，也会实际单独编译 RM2026，确认它不需要带上网页组件。
 
-- `src/adaptor/tauri/mqttAdapter.ts`: MQTT operations, Tauri events, byte
-  normalization, single/batch messages exposed as individual raw messages.
-- `src/rules/types.ts`: runtime-independent `MqttRule` and `MqttControlRule` contracts.
-- `src/rules/rm2026/index.ts`: public RM2026 factory, Client ID parsing and command
-  encoding exports. Consumers do not import its implementation files.
-- `src/rules/rm2026/decoder.ts`, `adapter.ts`, `telemetry.ts`, `commands.ts`, `control.ts`:
-  protobuf, protocol IDs, units, team ordering and command serialization.
-- `src/contracts/RobotUpdate.ts` and `ClientUpdate.ts`: incremental application
-  updates. Robot routing remains `robotId`; match data is not a fake robot.
-- `src/stores/robotStore.ts`: robot state, partial updates and field receipt times.
-- `src/stores/matchStore.ts`: game status, team economy/base/outpost state,
-  mechanisms, events, rune and radar observations.
-- `src/input/customDataInput.ts`: user-defined asynchronous content parsing,
-  keyed by incoming robot ID, with coalescing and session cancellation.
-- `src/stores/robotSelectionStore.ts`: configured UI name/ID selection. Changing
-  selection neither clears telemetry nor changes the MQTT connection identity.
-- `src/stores/connectionStore.ts`: connection metadata and ingress counters.
-- `src/composables/useTelemetryView.ts`: read-only projections for Dashboard and
-  existing XML/YAML binding paths. It owns no decoded state or MQTT listener.
+目录名本身不是强制标准。这样分是为了以后更换协议时，不必到血条、小地图和窗口代码里逐个修改。
 
-## Identity and lifecycle
+## 2. 收到机器人数据后，经过哪些文件
 
-The established MQTT connection's active Client ID determines RM2026 `selfRobotId`.
-The Rule instance keeps that ID immutable. StaticStatus is validated against it;
-it cannot change session identity or UI selection. DynamicStatus, ModuleStatus,
-InjuryStat, RespawnStatus and PenaltyInfo use the bound session ID. Position and
-Buff use their own explicit payload ID; radar identity comes from documented
-ordered slots. Ally/enemy values are converted into absolute red/blue team state
-inside Rule.
+| 顺序 | 文件 | 做什么 |
+| --- | --- | --- |
+| 1 | `src-tauri/src/mqtt_client.rs` | 电脑端连接服务器，收取 MQTT 数据 |
+| 2 | `src/communication/mqtt/mqttAdapter.ts` | 把电脑端收到的内容交给前端，统一为字节数组 |
+| 3 | `src/communication/mqtt/mqttRuleRunner.ts` | 把消息交给当前规则，把处理结果分给相应状态 |
+| 4 | `rules/rm2026/index.ts` 及内部文件 | 解释 RM2026 内容、编号、单位，把协议字段变成程序字段 |
+| 5 | `src/state/telemetry/` | 保存机器人、比赛、连接或自定义数据 |
+| 6 | `src/telemetry/useTelemetryView.ts` | 把已有状态整理成界面和旧面板配置可读取的字段 |
+| 7 | `src/pages/`、`src/ui/` | 显示血量、模块灯、比赛状态等 |
 
-`src/input/rm2026RuleLifecycle.ts` replaces listeners when identity changes and
-stops them on disconnect/disposal. Old pending callbacks and custom parse results
-cannot write into the new session. Robot health/module/position reports are
-invalidated, remote-action permissions cleared, and match/custom state reset.
-History values are not republished as new reports.
+`RawMqttMessage` 是“刚收到、还没解释的消息”；`ClientUpdate` 是“解释后，哪些字段需要更新”。它们的定义在 `core/contracts`。收到一条血量消息，只更新其中的字段，不把没提到的弹量清空。数字 0 和布尔值 false 都是有效数据。
 
-## Removed
+机器人数据由 `robotStore.ts` 保存，比赛数据由 `matchStore.ts` 保存，不把比赛伪装成一台机器人。自定义字节经过 `src/communication/custom-data/customDataInput.ts`，保存在 `customDataStore.ts`。
 
-- AI detection components, Python service, shared-memory bridge, model archive,
-  placeholder WebRTC distribution and legacy AI packaging variants. The product
-  is BNGUClient; UDP video decoding remains independent of telemetry and AI.
-- `src/store/modules/mqtt_data.ts`
-- `src/mqtt/mqttDecoder.worker.ts`
-- `src/mqtt/mqttPayloadDecoder.ts`
-- `src/utils/mqtt_protocol.ts`
-- `src/utils/mqtt_protocol_constants.ts`
-- The api-shim incoming MQTT queue/listeners and Dashboard decoded-message pump.
+旧的 mqtt_data、MQTT Worker 和第二套解码入口已经移除。`src/desktop/api.ts` 还服务于已有桌面按钮和命令面板，但不再另外收一遍机器人状态消息。
 
-The rest of `api-shim.ts` remains for existing desktop APIs and command panels;
-it is not a second telemetry chain. Command serialization is now delegated to
-RM2026's public codec without adding ControlIntent or electrical-control actions.
+## 3. 程序怎样知道这是哪台机器人
 
-## Operator input and outgoing control
+这里有两个不同的编号来源：
 
-`App.vue` keeps Dashboard mounted while the native Esc dialog switches tool pages.
-Tool views have separate KeepAlive keys; they read stores and never decode MQTT.
-Opening the dialog synchronously calls Dashboard's releaseControl before focus moves;
-the background cockpit becomes inert. Explicit arming is required after menus,
-window blur, disconnect/reconnect, identity changes and HUD editing. Release still
-uses the existing neutral OperatorInput/sender path, not a new control encoding.
+- **已经建立的连接的 Client ID**：决定本次本机身份。RM2026 规则按这个身份处理没有自己携带可靠编号的报告。
+- **界面下拉框**：只决定屏幕上查看哪台机器人，不决定收到的消息写给谁。
 
-`CockpitOverlay.vue` is a compact read-only projection. The old customizable HUD
-remains available in the workbench without rewriting saved layouts. Telemetry's
-old random robot simulation is replaced by real state, bounded health samples and
-a JSON snapshot export (not packet recording/replay). No reference-project legacy
-decoder/store is brought into this application.
+连接建立后，`src/app/rm2026RuleLifecycle.ts` 创建对应规则。`parseRm2026Identity` 在 RM2026 内解释编号并返回队伍，客户端不再自己用“小于 100 就是红队”来判断。
 
-`RoboControl.vue` captures browser key codes, raw mouse deltas and button states as
-`OperatorInput`. Capture rate and accepted keys come from the selected Rule policy.
-The RM2026 control Rule owns keyboard bits, Y/wheel sign conversion, int32 limits,
-protobuf bytes and MQTT options. UI no longer encodes these wire fields.
+`RobotStaticStatus` 是静态信息报告。它携带的编号必须与当前连接身份一致；不一致会提示并忽略这条更新，不会偷偷换身份。`RobotDynamicStatus`、模块状态等报告使用本次连接身份；位置和增益报告中的明确编号则按各自字段处理。
 
-`Dashboard → controlSender → MqttControlRule → OutboundMqttMessage → mqttAdapter`
-is separate from the telemetry runner. `src/output/clientControlOutput.ts` is the
-composition point for switching the MQTT control Rule. Other command panels remain
-protocol-aware compatibility clients; they are not claimed as migrated input sources.
+换编号或断线时，旧规则和监听会停止，旧的异步处理结果不能跑进新连接。血量、位置、模块报告会标记为失效，等待新数据；不能把上一台机器人的旧值当成刚收到的状态。
 
-The sender coalesces accumulated relative motion with latest key/button state,
-keeps one active send, and cancels queued/encoding work on disconnect or disposal.
-An already submitted transport publish cannot be revoked. Forced release replaces
-pending motion but is not a substitute for robot-side communication timeout safety.
+这一套不靠“最后创建的机器人”或“当前下拉框选择”猜编号，也不拿 0 当默认机器人。
 
-## Preserved binding paths and limits
+## 4. 键盘鼠标怎样发出去
 
-Existing paths such as `robot.blue.103.currentHealth`, `currentRobot.currentHeat`,
-`gameStatus.currentStage`, `penaltyInfo.penaltyEffectSec`, `injuryStats.103.totalDamage`
-and module numeric indicators remain readable through UI projections. The Domain
-uses semantic stages, module availability, buffs and penalty kinds; display codes
-exist only for persisted UI configuration compatibility. `robotType` now displays
-the configured type name, not an undocumented wire type number.
+```text
+RoboControl 记录按键和鼠标
+    → OperatorInput：记录“按了什么、移动了多少”
+    → controlSender：安排发送，避免把旧输入积压很久
+    → RM2026 控制规则：转换成对方要求的格式
+    → mqttAdapter 和 Rust：发给服务器
+```
 
-The existing desktop `parseCustomData()` API is still a null-returning placeholder.
-Receiving a custom stream is implemented, including raw byte inspection; arbitrary
-user binary fields/image decoding is not claimed as implemented. A real parser can
-be injected into `createCustomDataInput` without changing telemetry Rule or stores.
+相关文件：
 
-This migration is verified with `npm run check` (typecheck, tests and proto checks),
-`npm run build`, Rust formatting/static/tests checks, and Git
-whitespace/dependency checks. Automated protobuf-to-state tests are not a substitute
-for field testing against an official referee-system MQTT server.
+- `src/ui/control/RoboControl.vue`：采集输入，不在这里手写 RM2026 键位数字。
+- `core/contracts/OperatorInput.ts`：共用输入格式。
+- `src/communication/control/controlSender.ts`：合并鼠标移动、保留最新按键状态，处理正在发送或等待发送的任务。
+- `rules/rm2026/control.ts`：负责 RM2026 键位、鼠标方向、数值范围和编码。
+- `src/app/clientControlOutput.ts`：选择当前使用的控制规则。
+
+客户端不决定“W 对应多少速度”“某键是否发射”。这些动作由电控实现。
+
+打开菜单、失去焦点、断线和进入编辑会取消启用状态。释放控制会发送按键和按钮归零的信息，并替换掉尚未发送的旧输入。但已经交给网络的数据无法撤回，归零消息也可能丢失；**机器人端必须自己做通信中断保护**。
+
+普通购买/性能等命令面板目前仍通过 RM2026 的公共编码方法发送，没有宣称全部变成了通用键鼠输入。
+
+## 5. 打开菜单为什么不会断视频
+
+`src/app/App.vue` 一直保留操作视野页面，不因切换遥测或设置而卸载它。菜单先释放控制，再接管键盘焦点；关闭后不会自动重新控制。
+
+默认简洁面板在 `src/ui/cockpit/CockpitOverlay.vue`。原有自定义面板放在工作台中编辑，编辑完成后也可以正常用于操作。已保存的面板布局没有因目录调整而改写。
+
+遥测页使用真实状态，不再生成随机机器人。血量采样最多 120 点，JSON 导出只是当前状态，不是完整消息录制或录像。
+
+## 6. 视频是另一条通道
+
+UDP 视频不经过 MQTT 的消息解释模块。电脑端先接收分片，拼成帧，再解码显示：
+
+```text
+视频发送设备 → UDP 分片 → Rust 组帧 → H.265 解码 → 本地 MJPEG → 客户端画面
+```
+
+对应 `src-tauri/src/udp_bridge.rs` 和 `src-tauri/src/video_decoder.rs`。MQTT 连接正常不代表视频正常；本地视频地址有连接也不代表一直收到新画面。
+
+默认构建可以用现有软件解码路径；额外 FFmpeg 是可选功能，不是第一次启动的前置步骤。
+
+## 7. 自定义数据为什么还不能显示图片
+
+现在能接收自定义字节，能按来数据的机器人编号归属，也能查看原始内容。但 `src/desktop/api.ts` 里的 `parseCustomData()` 仍未实现，返回 null。
+
+电控最终约定之前，不能猜这些字节里哪个是血量、哪个是图片。以后在 `src/communication/custom-data/customDataInput.ts` 接入实际解析方法即可，不需要重写血条或 MQTT 收取入口。
+
+当前积压处理只保留最新待解析内容，适合“最新状态”，不适合直接拼完整图片。图片还需单独设计格式、分片和丢包处理。
+
+## 8. 哪些旧面板配置仍可用
+
+已有配置中的 `currentRobot.currentHeat`、`robot.blue.103.currentHealth`、`gameStatus.currentStage` 等字段，继续由 `src/telemetry/useTelemetryView.ts` 提供。
+
+这是让旧面板能读新状态，不是偷偷保留了旧数据链。修改字段时先确认配置文件用的名字，别只改类型定义导致面板取不到值。
+
+## 9. 怎样确认没有改坏
+
+项目根目录运行 `npm.cmd run check` 和 `npm.cmd run build`。Mock 独立运行测试和类型检查，详细命令见 [排错页](debugging.md#9-提交代码前的检查)。
+
+测试覆盖了身份、字段更新、旧连接清理、控制发送、单一协议文件和文件依赖限制。它们不能代替在官方服务器和真实机器人上测试。运行方法、文件位置和上机前清单分别见 [安装](installation-and-usage.md)、[目录](project-map.md)、[上机检查](development-handoff.md)。

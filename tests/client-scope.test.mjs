@@ -27,10 +27,10 @@ test('AI and placeholder distribution are removed without removing client capabi
     'src/components/Dashboard/PerformanceOptimizer.vue', 'src/domain/vision/Detection.ts',
     'SharkVisionLiteServer-open-source-v1.0.0-20260519.zip'
   ]) assert.equal(existsSync(new URL(`../${file}`, import.meta.url)), false, file)
-  for (const file of ['src/views/Dashboard.vue', 'src/views/Settings.vue', 'src/api-shim.ts', 'src/store/modules/dashboard.ts', 'src-tauri/src/lib.rs']) {
+  for (const file of ['src/pages/Cockpit.vue', 'src/pages/Settings.vue', 'src/desktop/api.ts', 'src/state/ui/dashboard.ts', 'src-tauri/src/lib.rs']) {
     assert.doesNotMatch(read(file), /DetectionService|DetectionOverlay|pipeServer|pipe_server|shm_bridge|toggleDetection|webrtcDistribute|enableSimulation|startHeatSimulation/, file)
   }
-  for (const file of ['src/input/mqttRuleRunner.ts', 'src/rules/rm2026/control.ts', 'src/stores/robotStore.ts', 'src/input/customDataInput.ts', 'src-tauri/src/udp_bridge.rs', 'src-tauri/src/video_decoder.rs']) {
+  for (const file of ['src/communication/mqtt/mqttRuleRunner.ts', 'rules/rm2026/control.ts', 'src/state/telemetry/robotStore.ts', 'src/communication/custom-data/customDataInput.ts', 'src-tauri/src/udp_bridge.rs', 'src-tauri/src/video_decoder.rs']) {
     assert.ok(existsSync(new URL(`../${file}`, import.meta.url)), file)
   }
   const pkg = JSON.parse(read('package.json'))
@@ -38,7 +38,7 @@ test('AI and placeholder distribution are removed without removing client capabi
 })
 
 test('crosshair heat is projected from telemetry rather than a simulation timer', () => {
-  const dashboard = read('src/views/Dashboard.vue')
+  const dashboard = read('src/pages/Cockpit.vue')
   assert.match(dashboard, /telemetry\.getRobot\(telemetry\.currentRobotId\)/)
   assert.match(dashboard, /robot\.currentHeat \/ robot\.maxHeat/)
   assert.doesNotMatch(dashboard, /heatTimer|muzzleHeat|HEAT_SIMULATION_INTERVAL/)
@@ -51,7 +51,7 @@ test('runtime source has no old product prefixes; C and Rust video shim symbols 
       return entry.isDirectory() ? walk(path) : /\.(vue|ts|rs|c)$/.test(entry.name) ? [path] : []
     })
   }
-  for (const base of ['src/', 'src-tauri/src/']) for (const file of walk(new URL(`../${base}`, import.meta.url))) {
+  for (const base of ['src/', 'core/', 'rules/', 'src-tauri/src/']) for (const file of walk(new URL(`../${base}`, import.meta.url))) {
     assert.doesNotMatch(readFileSync(file, 'utf8'), /SharkClient|SHARK_|shark_|shark\./, file.pathname)
   }
   const rust = read('src-tauri/src/ffmpeg_ffi.rs')
