@@ -1,4 +1,7 @@
 pub mod local_broker;
+mod poll;
+
+use poll::poll_with_batch;
 
 use rumqttc::{AsyncClient, Event, Incoming, LastWill, MqttOptions, QoS};
 use serde::{Deserialize, Serialize};
@@ -272,10 +275,11 @@ pub async fn mqtt_connect(
                         emit_mqtt_message_batch(&app_handle, &mut pending_messages);
                         break 'outer;
                     }
-                    _ = message_batch_interval.tick() => {
-                        emit_mqtt_message_batch(&app_handle, &mut pending_messages);
-                    }
-                    notification = eventloop.poll() => {
+                    notification = poll_with_batch(
+                        eventloop.poll(),
+                        &mut message_batch_interval,
+                        || emit_mqtt_message_batch(&app_handle, &mut pending_messages),
+                    ) => {
                         match notification {
                             Ok(Event::Incoming(Incoming::ConnAck(_))) => {
                                 has_connected_once = true;
