@@ -16,7 +16,9 @@ use tracing::warn;
 
 pub(super) const MJPEG_BOUNDARY: &str = "bnguclientframe";
 pub(super) const MJPEG_FALLBACK_QUALITY: u8 = 48;
-pub(super) const MJPEG_FALLBACK_MAX_FPS: u32 = 30;
+// The fast FFmpeg JPEG path can preserve a 60 FPS source without the former
+// Rust per-frame encoding cost. Rendering remains capped to bound bandwidth.
+pub(super) const MJPEG_FALLBACK_MAX_FPS: u32 = 60;
 const MAX_MJPEG_CLIENTS: usize = 4;
 
 struct MjpegFrameState {
@@ -187,6 +189,9 @@ fn serve_mjpeg_client(
     broadcaster: Arc<MjpegBroadcaster>,
     alive: Arc<AtomicBool>,
 ) {
+    // Frame headers, JPEG bytes and the trailing boundary must not wait for
+    // Nagle/delayed-ACK batching on the local display connection.
+    let _ = stream.set_nodelay(true);
     let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
 

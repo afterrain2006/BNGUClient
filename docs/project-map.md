@@ -57,7 +57,7 @@ BNGUClient/
 | --- | --- |
 | 菜单、快捷跳转、HUD 呈现方式 | `src/app/App.vue` |
 | 操作视野、图传展示及现有设置弹窗 | `src/pages/Cockpit.vue` |
-| 遥测页面和快照导出 | `src/pages/Telemetry.vue` |
+| 机器人状态页面和快照导出 | `src/pages/Telemetry.vue` |
 | 自定义数据页面 | `src/pages/CustomData.vue` |
 | 全屏快捷键、调试开关、退出 | `src/pages/Settings.vue` |
 | 紧凑 HUD、机器人状态显示 | `src/ui/cockpit/` |

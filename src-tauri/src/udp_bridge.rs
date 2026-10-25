@@ -149,6 +149,11 @@ const MAX_FRAME_SIZE: u32 = 16 * 1024 * 1024;
 /// references. Keep only a short contiguous queue and jump forward on keyframes.
 const H265_DECODE_QUEUE_CAPACITY: usize = 6;
 
+// Starting a hardware decoder may take hundreds of milliseconds. Preserve a
+// bounded contiguous GOP during startup, then return to the short live queue
+// once decoded output is available and the startup backlog has drained.
+const H265_STARTUP_QUEUE_CAPACITY: usize = 120;
+
 /// Drop incomplete fragmented frames quickly. With the fixed UDP protocol we
 /// cannot repair lost fragments, so waiting longer only preserves stale video.
 const FRAME_ASSEMBLY_TIMEOUT: Duration = Duration::from_millis(120);
@@ -167,6 +172,7 @@ struct PendingH265Frame {
 struct H265DecodeQueue {
     frames: VecDeque<PendingH265Frame>,
     needs_keyframe: bool,
+    warming_up: bool,
 }
 
 struct H265Worker {
@@ -466,6 +472,7 @@ async fn udp_receive_loop(
         StdMutex::new(H265DecodeQueue {
             frames: VecDeque::with_capacity(H265_DECODE_QUEUE_CAPACITY),
             needs_keyframe: true,
+            warming_up: true,
         }),
         Condvar::new(),
     ));
@@ -508,14 +515,23 @@ async fn udp_receive_loop(
                     if pending.reset_decoder {
                         dec = None;
                     }
-                    let d = dec.get_or_insert_with(SmartDecoder::new);
+                    let d = dec.get_or_insert_with(|| SmartDecoder::new_for_mjpeg(jpeg_quality));
                     let decode_started = Instant::now();
-                    let decode_result = d.decode_to_yuv(&pending.data);
+                    let decode_result = d.decode_to_jpeg(&pending.data, jpeg_quality);
                     stats_w.record_decoder_call(decode_started.elapsed());
                     stats_w.set_decoder_backend(d.backend_name());
                     match decode_result {
-                        Ok(Some(frame)) => {
+                        Ok(Some(jpeg)) => {
                             stats_w.decoded_frames.fetch_add(1, Ordering::Relaxed);
+                            {
+                                let (lock, _) = &*slot;
+                                let mut guard = lock.lock().unwrap();
+                                if !guard.needs_keyframe
+                                    && guard.frames.len() <= H265_DECODE_QUEUE_CAPACITY
+                                {
+                                    guard.warming_up = false;
+                                }
+                            }
                             let now = Instant::now();
                             if now.duration_since(last_publish) < frame_interval {
                                 stats_w.dropped_old_frames.fetch_add(1, Ordering::Relaxed);
@@ -529,10 +545,9 @@ async fn udp_receive_loop(
                                 .unwrap_or(0);
                             stats_w.last_frame_time.store(ts, Ordering::Relaxed);
                             if let Some(mjpeg) = &mjpeg_w {
-                                let jpeg = frame.to_jpeg(jpeg_quality);
                                 stats_w.set_frame_dimensions(
-                                    frame.width,
-                                    frame.height,
+                                    jpeg.width,
+                                    jpeg.height,
                                     jpeg.width,
                                     jpeg.height,
                                 );
@@ -540,10 +555,9 @@ async fn udp_receive_loop(
                             } else {
                                 // Non-MJPEG fallback should be rare, but keep a compact
                                 // JPEG IPC path instead of ever sending raw YUV again.
-                                let jpeg = frame.to_jpeg(jpeg_quality);
                                 stats_w.set_frame_dimensions(
-                                    frame.width,
-                                    frame.height,
+                                    jpeg.width,
+                                    jpeg.height,
                                     jpeg.width,
                                     jpeg.height,
                                 );
@@ -569,6 +583,7 @@ async fn udp_receive_loop(
                                 let dropped_old = guard.frames.len() as u32;
                                 guard.frames.clear();
                                 guard.needs_keyframe = true;
+                                guard.warming_up = true;
                                 stats_w
                                     .dropped_old_frames
                                     .fetch_add(dropped_old, Ordering::Relaxed);
@@ -1030,7 +1045,12 @@ fn send_frame_to_frontend(
         }
 
         let mut reset_decoder = false;
-        if guard.frames.len() >= H265_DECODE_QUEUE_CAPACITY {
+        let queue_capacity = if guard.warming_up {
+            H265_STARTUP_QUEUE_CAPACITY
+        } else {
+            H265_DECODE_QUEUE_CAPACITY
+        };
+        if guard.frames.len() >= queue_capacity {
             if info.is_keyframe {
                 // A keyframe lets us safely catch up to the freshest picture.
                 let dropped_old = guard.frames.len() as u32;
@@ -1042,6 +1062,7 @@ fn send_frame_to_frontend(
                     .dropped_frames
                     .fetch_add(dropped_old, Ordering::Relaxed);
                 guard.needs_keyframe = false;
+                guard.warming_up = true;
                 stats
                     .decoder_waiting_keyframe
                     .store(false, Ordering::Relaxed);
@@ -1054,6 +1075,7 @@ fn send_frame_to_frontend(
                 let dropped_old = guard.frames.len() as u32;
                 guard.frames.clear();
                 guard.needs_keyframe = true;
+                guard.warming_up = true;
                 stats
                     .dropped_old_frames
                     .fetch_add(dropped_old, Ordering::Relaxed);
@@ -1077,6 +1099,7 @@ fn send_frame_to_frontend(
                 return;
             }
             guard.needs_keyframe = false;
+            guard.warming_up = true;
             reset_decoder = true;
             stats
                 .decoder_waiting_keyframe

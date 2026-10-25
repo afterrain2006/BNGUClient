@@ -1,6 +1,6 @@
 // RM2026 connection defaults. Kept with the protocol, not the cockpit UI.
 export const DEFAULT_MQTT_CONFIG = {
-  brokerUrl: 'mqtt://192.168.12.1:3333',
+  brokerUrl: 'mqtt://127.0.0.1:3333',
   port: 3333,
   clientId: '',
   username: '',

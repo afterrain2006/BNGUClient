@@ -206,6 +206,38 @@ pub struct SmartDecoder {
 unsafe impl Send for SmartDecoder {}
 
 impl SmartDecoder {
+    /// Prefer FFmpeg's native JPEG encoder for the browser render path. This
+    /// avoids a raw YUV pipe transfer and the slower Rust JPEG conversion.
+    pub fn new_for_mjpeg(quality: u8) -> Self {
+        match GpuDecoder::try_new_mjpeg(quality) {
+            Ok(gpu) => Self {
+                backend: DecoderBackend::Gpu(gpu),
+            },
+            Err(error) => {
+                info!(%error, "FFmpeg MJPEG output unavailable; using fallback decoder");
+                Self::new()
+            }
+        }
+    }
+
+    pub fn decode_to_jpeg(
+        &mut self,
+        h265_data: &[u8],
+        quality: u8,
+    ) -> Result<Option<EncodedJpegFrame>, String> {
+        if let DecoderBackend::Gpu(gpu) = &mut self.backend {
+            if gpu.is_alive() {
+                match gpu.decode_to_jpeg(h265_data, quality) {
+                    Ok(frame) => return Ok(frame),
+                    Err(error) => warn!(%error, "FFmpeg MJPEG decode failed; switching to CPU"),
+                }
+            }
+            self.switch_to_cpu();
+        }
+        self.decode_to_yuv(h265_data)
+            .map(|frame| frame.map(|frame| frame.to_jpeg(quality)))
+    }
+
     /// Create a new SmartDecoder. Picks the first backend that initializes.
     pub fn new() -> Self {
         #[cfg(feature = "internal-ffmpeg")]

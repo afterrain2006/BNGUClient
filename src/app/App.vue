@@ -12,7 +12,7 @@ import { useConnectionStore } from '@/state/telemetry/connectionStore'
 type Page = 'home' | 'telemetry' | 'data' | 'settings'
 const pages = [
   { id: 'home', label: '操作中心', icon: 'home' },
-  { id: 'telemetry', label: '遥测', icon: 'telemetry' },
+  { id: 'telemetry', label: '机器人状态', icon: 'telemetry' },
   { id: 'data', label: '自定义数据', icon: 'data' },
   { id: 'settings', label: '系统设置', icon: 'settings' }
 ] as const
@@ -121,41 +121,40 @@ onUnmounted(() => {
           <WorkspaceIcon name="menu" :size="16" /><span>菜单</span><kbd>ESC</kbd>
         </button>
       </div>
-      <span v-if="focusMode" class="focus-hint">专注模式 · F10 恢复状态面板</span>
+      <span v-if="focusMode" class="focus-hint">状态面板已隐藏 · F10 恢复显示</span>
     </main>
     <dialog ref="menu" class="workspace-menu" aria-labelledby="workspace-menu-title" @cancel.prevent="closeMenu">
       <header class="workspace-header">
         <div class="workspace-brand"><img src="/bnguclient.svg" alt="" /><strong>BNGUCLIENT</strong><span id="workspace-menu-title">/ {{ currentPage.label }}</span></div>
-        <button class="workspace-button return-button" @click="closeMenu"><span>返回操作视野</span><kbd>ESC</kbd><WorkspaceIcon name="close" :size="16" /></button>
+        <button class="workspace-button return-button" @click="closeMenu"><span>返回画面</span><kbd>ESC</kbd><WorkspaceIcon name="close" :size="16" /></button>
       </header>
       <div class="workspace-body">
         <nav class="workspace-nav" aria-label="操作菜单">
           <button v-for="item in pages" :key="item.id" :class="{ active: page === item.id }" :aria-current="page === item.id ? 'page' : undefined" @click="page = item.id">
             <WorkspaceIcon :name="item.icon" /><span>{{ item.label }}</span>
           </button>
-          <button class="workbench-link" @click="openWorkbench"><WorkspaceIcon name="workspace" /><span>HUD 工作台</span></button>
+          <button class="workbench-link" @click="openWorkbench"><WorkspaceIcon name="workspace" /><span>面板编辑</span></button>
         </nav>
         <section class="workspace-page" :aria-label="currentPage.label">
           <div v-if="page === 'home'" class="workspace-home">
-            <p class="workspace-eyebrow">OPERATIONS / BNGUCLIENT</p>
-            <h1>保持专注，掌握全局。</h1>
-            <p class="workspace-description">菜单打开时释放键鼠控制，图传与遥测继续接收。返回视野后，请手动重新启用控制。</p>
-            <div class="workspace-summary" :class="{ connected: connection.connected }"><i />{{ connection.connected ? 'MQTT 已连接' : 'MQTT 未连接' }}<span>连接身份 {{ connection.activeClientId ?? '—' }}</span></div>
+            <h1>连接与显示设置</h1>
+            <p class="workspace-description">打开菜单会暂停键鼠控制，视频和状态数据继续接收。返回画面后需手动启用控制。</p>
+            <div class="workspace-summary" :class="{ connected: connection.connected }"><i />{{ connection.connected ? 'MQTT 已连接' : 'MQTT 未连接' }}<span>机器人编号 {{ connection.activeClientId ?? '—' }}</span></div>
             <div class="workspace-shortcuts">
-              <button @click="openDashboardSettings('network')"><WorkspaceIcon name="link" /><strong>连接配置</strong><span>MQTT、UDP 与图传来源</span><WorkspaceIcon name="arrow" :size="16" /></button>
+              <button @click="openDashboardSettings('network')"><WorkspaceIcon name="link" /><strong>连接配置</strong><span>设置数据连接地址和视频接收端口</span><WorkspaceIcon name="arrow" :size="16" /></button>
               <button @click="openDashboardSettings('video')"><WorkspaceIcon name="focus" /><strong>视频与显示</strong><span>视频源、摄像头与画面设置</span><WorkspaceIcon name="arrow" :size="16" /></button>
-              <button @click="page = 'telemetry'"><WorkspaceIcon name="telemetry" /><strong>遥测检查</strong><span>真实状态、模块灯与数据新鲜度</span><WorkspaceIcon name="arrow" :size="16" /></button>
-              <button @click="page = 'data'"><WorkspaceIcon name="data" /><strong>自定义数据</strong><span>检查接收字节与解析状态</span><WorkspaceIcon name="arrow" :size="16" /></button>
+              <button @click="page = 'telemetry'"><WorkspaceIcon name="telemetry" /><strong>机器人状态</strong><span>查看血量、模块状态和更新时间</span><WorkspaceIcon name="arrow" :size="16" /></button>
+              <button @click="page = 'data'"><WorkspaceIcon name="data" /><strong>自定义数据</strong><span>查看电控发送的自定义数据</span><WorkspaceIcon name="arrow" :size="16" /></button>
             </div>
             <div class="workspace-tools">
-              <section><p class="workspace-eyebrow">DISPLAY / 显示</p><h2>适合操作，也保留自由。</h2><p>当前使用{{ customHudMode ? '自定义 HUD' : '紧凑状态面板' }}；复杂布局、绘图和面板定制放在高级工作台。</p><div class="workspace-tool-actions"><button class="workspace-button" @click="focusMode = !focusMode">{{ focusMode ? '关闭专注模式' : '开启专注模式' }} <kbd>F10</kbd></button><button class="workspace-button" @click="setCustomHudMode(!customHudMode)">{{ customHudMode ? '使用紧凑 HUD' : '使用自定义 HUD' }}</button><button class="workspace-button" @click="openWorkbench">编辑 HUD 布局</button></div></section>
-              <section><p class="workspace-eyebrow">QUICK GUIDE / 快捷操作</p><dl><div><dt>Esc</dt><dd>打开 / 关闭菜单；优先退出当前弹窗或编辑</dd></div><div><dt>Ctrl + 1…4</dt><dd>操作中心 / 遥测 / 自定义数据 / 系统设置</dd></div><div><dt>F11</dt><dd>切换全屏（可在系统设置中关闭）</dd></div></dl></section>
+              <section><h2>画面与状态面板</h2><p>当前使用{{ customHudMode ? '自定义面板' : '紧凑状态面板' }}。可切换显示方式，或编辑血条、小地图等面板的位置和内容。</p><div class="workspace-tool-actions"><button class="workspace-button" @click="focusMode = !focusMode">{{ focusMode ? '显示状态面板' : '隐藏状态面板' }} <kbd>F10</kbd></button><button class="workspace-button" @click="setCustomHudMode(!customHudMode)">{{ customHudMode ? '使用紧凑面板' : '使用自定义面板' }}</button><button class="workspace-button" @click="openWorkbench">编辑面板布局</button></div></section>
+              <section><p class="workspace-eyebrow">快捷键</p><dl><div><dt>Esc</dt><dd>打开 / 关闭菜单；优先退出当前弹窗或编辑</dd></div><div><dt>Ctrl + 1…4</dt><dd>操作中心 / 机器人状态 / 自定义数据 / 系统设置</dd></div><div><dt>F11</dt><dd>切换全屏（可在系统设置中关闭）</dd></div></dl></section>
             </div>
           </div>
           <KeepAlive><component :is="components[page]" v-if="page !== 'home'" :key="page" ref="activeTool" /></KeepAlive>
         </section>
       </div>
-      <footer class="workspace-footer"><span><i :class="{ online: connection.connected }" />{{ connection.connected ? 'LIVE · MQTT' : 'OFFLINE · 未连接' }}</span><span>RX {{ connection.messagesReceived }} · 返回视野不会自动启用控制</span></footer>
+      <footer class="workspace-footer"><span><i :class="{ online: connection.connected }" />{{ connection.connected ? '状态数据已连接' : '状态数据未连接' }}</span><span>已接收 {{ connection.messagesReceived }} 条消息 · 返回视野不会自动启用控制</span></footer>
     </dialog>
   </div>
 </template>

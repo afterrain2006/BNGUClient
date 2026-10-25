@@ -1,7 +1,7 @@
 //! GPU-accelerated H.265 decoder via FFmpeg subprocess (`-hwaccel auto`).
 //!
 //! Spawns an external `ffmpeg` and pipes raw HEVC into stdin, parses the
-//! resulting `yuv4mpegpipe` (Y4M) stream from stdout. Per-platform hwaccel
+//! resulting MJPEG display frames or `yuv4mpegpipe` frames from stdout. Per-platform hwaccel
 //! probing tries d3d11va/dxva2/qsv/cuda on Windows, vaapi/qsv/cuda on Linux,
 //! videotoolbox on macOS. Falls back to "auto" if none enumerated.
 
@@ -15,7 +15,13 @@ use std::thread::JoinHandle;
 
 use tracing::{debug, error, info};
 
-use super::YuvFrame;
+use super::{EncodedJpegFrame, YuvFrame};
+
+#[derive(Clone, Copy)]
+enum DecoderOutput {
+    Yuv,
+    Jpeg(u8),
+}
 
 /// Spawn `Command` without flashing a console window on Windows.
 /// Sets `CREATE_NO_WINDOW` (0x08000000); no-op on other platforms.
@@ -205,12 +211,13 @@ pub(super) fn find_ffmpeg() -> Option<String> {
 ///   - macOS:   videotoolbox
 ///   - Fallback: "auto" (lets FFmpeg pick, may go to software)
 ///
-/// Outputs **YUV4MPEG2 (Y4M)** raw YUV420P stream so the frontend WebGL
-/// renderer can upload planes directly — no JPEG re-encode on the CPU.
+/// The browser display path uses FFmpeg's JPEG encoder directly. Raw
+/// YUV4MPEG2 output remains available for callers that need decoded planes.
 pub(super) struct GpuDecoder {
     child: Child,
     stdin: BufWriter<std::process::ChildStdin>,
     frame_rx: Receiver<YuvFrame>,
+    jpeg_rx: Option<Receiver<EncodedJpegFrame>>,
     reader_thread: Option<JoinHandle<()>>,
     pending_frames: VecDeque<YuvFrame>,
     frame_count: u64,
@@ -264,6 +271,14 @@ impl GpuDecoder {
     /// Try to create a GPU decoder. Returns Err if FFmpeg is not available,
     /// or if every probed hwaccel failed to start.
     pub(super) fn try_new() -> Result<Self, String> {
+        Self::try_new_with_output(DecoderOutput::Yuv)
+    }
+
+    pub(super) fn try_new_mjpeg(quality: u8) -> Result<Self, String> {
+        Self::try_new_with_output(DecoderOutput::Jpeg(quality))
+    }
+
+    fn try_new_with_output(output: DecoderOutput) -> Result<Self, String> {
         let ffmpeg = find_ffmpeg().ok_or_else(|| "FFmpeg not found in PATH".to_string())?;
 
         let mut last_err = String::from("no hwaccel attempted");
@@ -272,7 +287,7 @@ impl GpuDecoder {
             if *hwaccel != "auto" && !ffmpeg_lists_hwaccel(&ffmpeg, hwaccel) {
                 continue;
             }
-            match Self::spawn_with_hwaccel(&ffmpeg, hwaccel) {
+            match Self::spawn_with_hwaccel_and_output(&ffmpeg, hwaccel, output) {
                 Ok(decoder) => return Ok(decoder),
                 Err(e) => {
                     debug!(%hwaccel, error = %e, "hwaccel attempt failed");
@@ -283,7 +298,16 @@ impl GpuDecoder {
         Err(last_err)
     }
 
+    #[cfg(test)]
     fn spawn_with_hwaccel(ffmpeg: &str, hwaccel: &str) -> Result<Self, String> {
+        Self::spawn_with_hwaccel_and_output(ffmpeg, hwaccel, DecoderOutput::Yuv)
+    }
+
+    fn spawn_with_hwaccel_and_output(
+        ffmpeg: &str,
+        hwaccel: &str,
+        output: DecoderOutput,
+    ) -> Result<Self, String> {
         // Optional downscale cap to control IPC bandwidth.
         //   Raw YUV420P at 1080p = 1920*1080*1.5 ≈ 3.1 MB/frame → 90 MB/s at 30 FPS.
         //   Capping at 720p cuts this by ~55% while remaining visually acceptable for
@@ -301,6 +325,25 @@ impl GpuDecoder {
                 }
             })
             .unwrap_or(720);
+        let max_height = if matches!(output, DecoderOutput::Jpeg(_)) {
+            let jpeg_max_height = std::env::var("BNGUCLIENT_MJPEG_MAX_HEIGHT")
+                .ok()
+                .and_then(|value| {
+                    let value = value.trim().to_ascii_lowercase();
+                    if value == "none" {
+                        Some(0)
+                    } else {
+                        value.parse::<u32>().ok()
+                    }
+                })
+                .unwrap_or(720);
+            match (max_height, jpeg_max_height) {
+                (0, limit) | (limit, 0) => limit,
+                (video_limit, jpeg_limit) => video_limit.min(jpeg_limit),
+            }
+        } else {
+            max_height
+        };
         // Build: only downscale if source > max_height; never upscale.
         // Both dimensions MUST be even for yuv420p (chroma is subsampled 2x2).
         // `-2` in scale= means "auto, multiple of 2", but combined with
@@ -339,14 +382,23 @@ impl GpuDecoder {
         if let Some(scale) = scale_clause {
             filter_chain.push(scale);
         }
-        filter_chain.push("format=yuv420p".into());
+        filter_chain.push(match output {
+            DecoderOutput::Yuv => "format=yuv420p".into(),
+            DecoderOutput::Jpeg(_) => "format=yuvj420p".into(),
+        });
+        if matches!(output, DecoderOutput::Jpeg(_)) {
+            // A burst of live HEVC packets can share wall-clock PTS. MJPEG
+            // requires strictly increasing timestamps, unlike the Y4M muxer.
+            filter_chain.push("setpts=N/FRAME_RATE/TB".into());
+        }
         let filter_expr = filter_chain.join(",");
 
         let mut cmd = Command::new(ffmpeg);
         no_window(&mut cmd);
         cmd.args([
-            "-fflags",
-            "nobuffer",
+            // Keep the packet consumed while probing HEVC. With `nobuffer`,
+            // FFmpeg discards that first IRAP picture and its parameter sets,
+            // leaving a live decoder unable to start from subsequent deltas.
             "-flags",
             "low_delay",
             "-probesize",
@@ -363,18 +415,26 @@ impl GpuDecoder {
             "-hwaccel", hwaccel, "-f", "hevc", "-i", "pipe:0", "-vsync", "0",
         ]);
         cmd.args(["-vf", &filter_expr]);
-        cmd.args([
-            "-f",
-            "yuv4mpegpipe",
-            "-pix_fmt",
-            "yuv420p",
-            "-strict",
-            "-1", // Allow odd dims (Y4M requires even for 4:2:0 but we never send odd)
-            "-an",
-            "-v",
-            "error",
-            "pipe:1",
-        ]);
+        match output {
+            DecoderOutput::Yuv => {
+                cmd.args(["-f", "yuv4mpegpipe", "-pix_fmt", "yuv420p", "-strict", "-1"]);
+            }
+            DecoderOutput::Jpeg(quality) => {
+                // Encode next to the decoder instead of sending large YUV
+                // planes through a pipe and re-encoding them in Rust.
+                let qscale = 2 + (100 - u32::from(quality.min(100))) * 10 / 100;
+                cmd.args([
+                    "-c:v",
+                    "mjpeg",
+                    "-q:v",
+                    &qscale.to_string(),
+                    "-threads",
+                    "1",
+                ]);
+                cmd.args(["-f", "image2pipe", "-flush_packets", "1"]);
+            }
+        }
+        cmd.args(["-an", "-v", "error", "pipe:1"]);
 
         let mut child = cmd
             .stdin(Stdio::piped())
@@ -386,7 +446,14 @@ impl GpuDecoder {
         let stdin = BufWriter::new(child.stdin.take().unwrap());
         let stdout = child.stdout.take().unwrap();
         let (frame_tx, frame_rx) = mpsc::channel();
-        let reader_thread = Some(spawn_ffmpeg_y4m_reader(stdout, frame_tx));
+        let (reader_thread, jpeg_rx) = match output {
+            DecoderOutput::Yuv => (spawn_ffmpeg_y4m_reader(stdout, frame_tx), None),
+            DecoderOutput::Jpeg(_) => {
+                let (jpeg_tx, jpeg_rx) = mpsc::channel();
+                (spawn_ffmpeg_jpeg_reader(stdout, jpeg_tx), Some(jpeg_rx))
+            }
+        };
+        let reader_thread = Some(reader_thread);
 
         // Short settle delay so immediate spawn failures surface via try_wait.
         std::thread::sleep(std::time::Duration::from_millis(40));
@@ -397,13 +464,15 @@ impl GpuDecoder {
         info!(
             path = %ffmpeg,
             %hwaccel,
-            "FFmpeg started (output=Y4M/YUV420P)"
+            mjpeg = matches!(output, DecoderOutput::Jpeg(_)),
+            "FFmpeg started"
         );
 
         Ok(Self {
             child,
             stdin,
             frame_rx,
+            jpeg_rx,
             reader_thread,
             pending_frames: VecDeque::with_capacity(8),
             frame_count: 0,
@@ -457,6 +526,40 @@ impl GpuDecoder {
         }
     }
 
+    pub(super) fn decode_to_jpeg(
+        &mut self,
+        h265_data: &[u8],
+        quality: u8,
+    ) -> Result<Option<EncodedJpegFrame>, String> {
+        if self.jpeg_rx.is_none() {
+            return self
+                .decode_to_yuv(h265_data)
+                .map(|frame| frame.map(|frame| frame.to_jpeg(quality)));
+        }
+        let mut latest = self.collect_latest_jpeg()?;
+        self.stdin
+            .write_all(h265_data)
+            .and_then(|_| self.stdin.flush())
+            .map_err(|e| format!("FFmpeg stdin write failed: {e}"))?;
+        if let Some(frame) = self.collect_latest_jpeg()? {
+            latest = Some(frame);
+        }
+        Ok(latest)
+    }
+
+    fn collect_latest_jpeg(&mut self) -> Result<Option<EncodedJpegFrame>, String> {
+        let receiver = self
+            .jpeg_rx
+            .as_ref()
+            .ok_or("decoder is not configured for MJPEG")?;
+        let mut latest = None;
+        while let Ok(frame) = receiver.try_recv() {
+            latest = Some(frame);
+            self.frame_count += 1;
+        }
+        Ok(latest)
+    }
+
     /// Check if the FFmpeg process is still running.
     pub(super) fn is_alive(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(None))
@@ -473,6 +576,72 @@ impl Drop for GpuDecoder {
     }
 }
 
+// ==================== MJPEG Stream Parser ====================
+
+#[derive(Default)]
+struct JpegStreamParser {
+    buffer: Vec<u8>,
+}
+
+impl JpegStreamParser {
+    fn push(&mut self, bytes: &[u8], mut on_frame: impl FnMut(EncodedJpegFrame)) {
+        use image::ImageDecoder;
+        self.buffer.extend_from_slice(bytes);
+        loop {
+            let Some(start) = self.buffer.windows(2).position(|pair| pair == [0xff, 0xd8]) else {
+                if self.buffer.len() > 1 {
+                    self.buffer.drain(..self.buffer.len() - 1);
+                }
+                return;
+            };
+            if start > 0 {
+                self.buffer.drain(..start);
+            }
+            let Some(end) = self.buffer[2..]
+                .windows(2)
+                .position(|pair| pair == [0xff, 0xd9])
+            else {
+                if self.buffer.len() > 16 * 1024 * 1024 {
+                    self.buffer.clear();
+                }
+                return;
+            };
+            let data: Vec<u8> = self.buffer.drain(..end + 4).collect();
+            let dimensions = image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(&data))
+                .map(|decoder| decoder.dimensions())
+                .ok();
+            if let Some((width, height)) = dimensions {
+                on_frame(EncodedJpegFrame {
+                    width,
+                    height,
+                    data,
+                });
+            }
+        }
+    }
+}
+
+fn spawn_ffmpeg_jpeg_reader(
+    mut stdout: ChildStdout,
+    tx: Sender<EncodedJpegFrame>,
+) -> JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut read_buf = vec![0; 65536];
+        let mut parser = JpegStreamParser::default();
+        while let Ok(n) = stdout.read(&mut read_buf) {
+            if n == 0 {
+                break;
+            }
+            let mut closed = false;
+            parser.push(&read_buf[..n], |frame| {
+                closed |= tx.send(frame).is_err();
+            });
+            if closed {
+                break;
+            }
+        }
+    })
+}
 // ==================== Y4M Stream Parser ====================
 //
 // YUV4MPEG2 format (FFmpeg `-f yuv4mpegpipe`):
@@ -614,4 +783,121 @@ fn spawn_ffmpeg_y4m_reader(mut stdout: ChildStdout, frame_tx: Sender<YuvFrame>) 
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{find_ffmpeg, DecoderOutput, GpuDecoder, JpegStreamParser};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn first_gop_produces_a_frame_without_closing_live_input() {
+        let Some(ffmpeg) = find_ffmpeg() else {
+            eprintln!("Skipping live-input decoder test: FFmpeg is unavailable");
+            return;
+        };
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tools/rm2026-mock-server/assets/test.h265");
+        let data = std::fs::read(fixture).expect("bundled synthetic HEVC fixture");
+        let mut access_units = Vec::new();
+        let mut index = 0;
+        while index + 5 < data.len() {
+            let start_code = if data[index..].starts_with(&[0, 0, 0, 1]) {
+                4
+            } else if data[index..].starts_with(&[0, 0, 1]) {
+                3
+            } else {
+                index += 1;
+                continue;
+            };
+            if (data[index + start_code] >> 1) & 0x3f == 35 {
+                access_units.push(index);
+            }
+            index += start_code;
+        }
+        assert!(access_units.len() > 24);
+
+        // The fixture has one IRAP every 30 frames. Feed fewer than one GOP:
+        // startup must retain its first IRAP instead of waiting for a second.
+        // Software decoding makes this test independent of GPU availability.
+        let mut decoder = GpuDecoder::spawn_with_hwaccel(&ffmpeg, "none")
+            .expect("FFmpeg software HEVC decoder should start");
+        let mut frame = None;
+        for n in 0..24 {
+            let start = if n == 0 { 0 } else { access_units[n] };
+            if let Some(decoded) = decoder
+                .decode_to_yuv(&data[start..access_units[n + 1]])
+                .expect("feed initial HEVC access units")
+            {
+                frame = Some(decoded);
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while frame.is_none() && Instant::now() < deadline {
+            frame = decoder
+                .frame_rx
+                .recv_timeout(Duration::from_millis(50))
+                .ok();
+        }
+        let frame = frame.expect("first GOP must produce a frame while stdin is still open");
+        assert!(frame.width > 0 && frame.height > 0);
+        assert_eq!(
+            frame.data.len(),
+            super::YuvFrame::expected_size(frame.width, frame.height)
+        );
+    }
+
+    #[test]
+    fn jpeg_reader_preserves_split_markers_and_multiple_frames() {
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
+            .encode(&[64; 4 * 4 * 3], 4, 4, image::ColorType::Rgb8.into())
+            .unwrap();
+        let stream = [b"noise".as_slice(), jpeg.as_slice(), jpeg.as_slice()].concat();
+        let mut parser = JpegStreamParser::default();
+        let mut frames = Vec::new();
+        for byte in &stream {
+            parser.push(std::slice::from_ref(byte), |frame| frames.push(frame));
+        }
+        assert_eq!(frames.len(), 2);
+        for frame in frames {
+            assert_eq!((frame.width, frame.height), (4, 4));
+            assert_eq!(frame.data, jpeg);
+        }
+    }
+
+    #[test]
+    fn ffmpeg_mjpeg_output_produces_a_decodable_image_without_eof() {
+        let Some(ffmpeg) = find_ffmpeg() else {
+            eprintln!("Skipping MJPEG decoder test: FFmpeg is unavailable");
+            return;
+        };
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tools/rm2026-mock-server/assets/test.h265");
+        let data = std::fs::read(fixture).unwrap();
+        let mut decoder =
+            GpuDecoder::spawn_with_hwaccel_and_output(&ffmpeg, "none", DecoderOutput::Jpeg(48))
+                .expect("FFmpeg MJPEG decoder should start");
+        let mut image = None;
+        for chunk in data.chunks(16 * 1024).take(32) {
+            if let Some(frame) = decoder.decode_to_jpeg(chunk, 48).unwrap() {
+                image = Some(frame);
+            }
+        }
+        if image.is_none() {
+            image = decoder
+                .jpeg_rx
+                .as_ref()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(3))
+                .ok();
+        }
+        let image = image.expect("JPEG output must arrive without closing live input");
+        let decoded = image::load_from_memory(&image.data).expect("valid JPEG pixels");
+        assert_eq!(
+            (decoded.width(), decoded.height()),
+            (image.width, image.height)
+        );
+        assert!(image.width > 0 && image.height > 0);
+    }
 }

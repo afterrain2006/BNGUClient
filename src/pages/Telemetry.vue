@@ -51,13 +51,13 @@ function exportSnapshot() {
   link.download = 'bnguclient-telemetry-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json'
   link.click()
   URL.revokeObjectURL(url)
-  exportMessage.value = '已导出当前状态快照，不包含连接密码。'
+  exportMessage.value = '已导出当前状态文件。'
 }
 </script>
 
 <template>
   <div class="telemetry-page">
-    <header class="telemetry-heading"><div><p class="eyebrow">TELEMETRY / LIVE STATE</p><h1>遥测检查</h1><p>只读当前数据链；没有收到的字段显示为「—」，不会填入演示值。</p></div><button @click="exportSnapshot">导出状态快照</button></header>
+    <header class="telemetry-heading"><div><h1>机器人状态</h1><p>查看血量、弹量、模块状态和更新时间。尚未收到的数据显示为「—」。</p></div><button @click="exportSnapshot">导出当前状态</button></header>
     <p v-if="exportMessage" class="export-notice" role="status">{{ exportMessage }}</p>
     <div class="telemetry-grid">
       <section class="telemetry-card">
@@ -65,18 +65,17 @@ function exportSnapshot() {
         <RobotHealthBar :current-health="robot?.combat.currentHealth ?? null" :max-health="robot?.configuration.maxHealth ?? null" :status="healthFreshness" />
         <dl class="metric-grid"><div><dt>剩余弹量</dt><dd>{{ display(robot?.combat.remainingAmmo) }}</dd></div><div><dt>射击热量</dt><dd>{{ display(robot?.combat.currentHeat) }} / {{ display(robot?.configuration.maxHeat) }}</dd></div><div><dt>底盘能量 / J</dt><dd>{{ display(robot?.combat.currentChassisEnergy) }}</dd></div><div><dt>缓冲能量 / J</dt><dd>{{ display(robot?.combat.currentBufferEnergy) }}</dd></div><div><dt>等级</dt><dd>{{ display(robot?.configuration.level) }}</dd></div><div><dt>位置 / m</dt><dd>{{ display(robot?.pose.position.x) }}, {{ display(robot?.pose.position.y) }}</dd></div></dl>
       </section>
-      <section class="telemetry-card"><h2>链路信息</h2><dl class="connection-list"><div><dt>MQTT</dt><dd :class="{ online: connection.connected }">{{ connection.connected ? '已连接' : '未连接' }}</dd></div><div><dt>连接 Client ID</dt><dd>{{ connection.activeClientId ?? '—' }}</dd></div><div><dt>累计接收消息</dt><dd>{{ connection.messagesReceived }}</dd></div><div><dt>最后一条消息</dt><dd>{{ connection.lastMessageTime ? new Date(connection.lastMessageTime).toLocaleTimeString() : '尚未收到' }}</dd></div><div><dt>已记录机器人</dt><dd>{{ Object.keys(robots.robots).length }}</dd></div></dl><p class="card-note">显示机器人与连接身份分别管理；切换显示对象不会修改消息路由。</p></section>
-      <section class="telemetry-card history-card"><h2>血量变化 <span>{{ history.length }} / 120 个采样点</span></h2><div v-if="history.length" class="history-chart"><svg viewBox="0 0 600 120" role="img" aria-label="最近血量采样趋势" preserveAspectRatio="none"><path d="M0 10H600 M0 60H600 M0 110H600" class="chart-grid" /><polyline :points="chartPoints" class="chart-line" /><circle v-for="(sample, index) in history" :key="sample.at" :cx="history.length <= 1 ? 0 : index / (history.length - 1) * 600" :cy="110 - sample.value / chartMax * 100" r="2" /></svg></div><div v-else class="telemetry-empty">等待当前机器人的新鲜血量报告</div><p class="card-note">每秒最多采样一次新报告，保留最近 120 点；切换机器人或连接后清空。不是完整报文录制。</p></section>
+      <section class="telemetry-card"><h2>连接信息</h2><dl class="connection-list"><div><dt>MQTT</dt><dd :class="{ online: connection.connected }">{{ connection.connected ? '已连接' : '未连接' }}</dd></div><div><dt>机器人编号（Client ID）</dt><dd>{{ connection.activeClientId ?? '—' }}</dd></div><div><dt>累计接收消息</dt><dd>{{ connection.messagesReceived }}</dd></div><div><dt>最后一条消息</dt><dd>{{ connection.lastMessageTime ? new Date(connection.lastMessageTime).toLocaleTimeString() : '尚未收到' }}</dd></div><div><dt>已记录机器人</dt><dd>{{ Object.keys(robots.robots).length }}</dd></div></dl><p class="card-note">这里切换查看对象不会改变连接的机器人。要连接另一台机器人，请修改网络页的 Client ID 并重新连接。</p></section>
+      <section class="telemetry-card history-card"><h2>血量变化 <span>{{ history.length }} / 120 条记录</span></h2><div v-if="history.length" class="history-chart"><svg viewBox="0 0 600 120" role="img" aria-label="最近血量变化" preserveAspectRatio="none"><path d="M0 10H600 M0 60H600 M0 110H600" class="chart-grid" /><polyline :points="chartPoints" class="chart-line" /><circle v-for="(sample, index) in history" :key="sample.at" :cx="history.length <= 1 ? 0 : index / (history.length - 1) * 600" :cy="110 - sample.value / chartMax * 100" r="2" /></svg></div><div v-else class="telemetry-empty">等待当前机器人的血量数据</div><p class="card-note">每秒最多记录一次血量，保留最近 120 条。切换机器人或重新连接后清空。</p></section>
       <section class="telemetry-card"><h2>模块状态 <span>{{ moduleFreshness === 'fresh' ? '报告有效' : moduleFreshness === 'stale' ? '报告已过期' : '等待报告' }}</span></h2><div class="module-grid"><div v-for="(label, key) in moduleLabels" :key="key" :class="{ online: moduleFreshness === 'fresh' && robot?.modules[key] === 'online', offline: moduleFreshness === 'fresh' && robot?.modules[key] === 'offline' }"><i /><span>{{ label }}</span><small>{{ moduleFreshness !== 'fresh' ? '—' : robot?.modules[key] === 'online' ? '在线' : robot?.modules[key] === 'offline' ? '离线' : '未知' }}</small></div></div></section>
     </div>
-    <section class="telemetry-card robot-list"><h2>已接收机器人</h2><div v-if="!Object.keys(robots.robots).length" class="telemetry-empty">连接后等待遥测数据。可在操作中心配置 MQTT。</div><div v-else class="robot-table-scroll"><table><thead><tr><th>机器人 ID</th><th>血量</th><th>热量</th><th>位置 X / Y</th><th>血量有效性</th></tr></thead><tbody><tr v-for="entry in robots.robots" :key="entry.identity.robotId"><td>{{ entry.identity.robotId }}</td><td>{{ display(entry.combat.currentHealth) }} / {{ display(entry.configuration.maxHealth) }}</td><td>{{ display(entry.combat.currentHeat) }}</td><td>{{ display(entry.pose.position.x) }} / {{ display(entry.pose.position.y) }}</td><td>{{ getDataFreshness(entry.healthUpdatedAt, now) === 'fresh' ? '新鲜' : getDataFreshness(entry.healthUpdatedAt, now) === 'stale' ? '已过期' : '未收到' }}</td></tr></tbody></table></div></section>
+    <section class="telemetry-card robot-list"><h2>已接收机器人</h2><div v-if="!Object.keys(robots.robots).length" class="telemetry-empty">尚未收到机器人数据。请在操作中心打开连接配置。</div><div v-else class="robot-table-scroll"><table><thead><tr><th>机器人 ID</th><th>血量</th><th>热量</th><th>位置 X / Y</th><th>血量数据状态</th></tr></thead><tbody><tr v-for="entry in robots.robots" :key="entry.identity.robotId"><td>{{ entry.identity.robotId }}</td><td>{{ display(entry.combat.currentHealth) }} / {{ display(entry.configuration.maxHealth) }}</td><td>{{ display(entry.combat.currentHeat) }}</td><td>{{ display(entry.pose.position.x) }} / {{ display(entry.pose.position.y) }}</td><td>{{ getDataFreshness(entry.healthUpdatedAt, now) === 'fresh' ? '已更新' : getDataFreshness(entry.healthUpdatedAt, now) === 'stale' ? '已过期' : '未收到' }}</td></tr></tbody></table></div></section>
   </div>
 </template>
 
 <style scoped>
 .telemetry-page { color: #d7e7ed; padding: 30px; max-width: 1350px; margin: 0 auto; }
 .telemetry-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 24px; }
-.eyebrow { font: 11px var(--font-tech-mono); letter-spacing: .12em; color: #86a5b4; }
 h1 { font-size: 27px; font-weight: 500; margin: 12px 0 10px; }
 .telemetry-heading p:last-child, .card-note { font-size: 12px; color: #8faab7; line-height: 1.8; }
 button { border: 1px solid #6d8e9a88; background: #1e343f; color: #bfe4eb; border-radius: 4px; padding: 10px 16px; cursor: pointer; white-space: nowrap; }

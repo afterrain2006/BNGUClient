@@ -125,7 +125,7 @@ const mqttConfig = computed({
 })
 
 // 网络配置（本地保留，不在 store 中）
-const ipAddress = ref('192.168.12.1')
+const ipAddress = ref('127.0.0.1')
 const mqttNeedsManualReconnect = ref(false)
 let mqttAutoConnectAttempted = false
 const mqttActiveClientId = ref<string | null>(null)
@@ -1477,7 +1477,7 @@ async function connectMqtt(options: { auto?: boolean; reason?: string } = {}): P
     // 解析 brokerUrl 为 host + port
     const urlMatch = brokerUrl.match(/^mqtts?:\/\/([^:\/]+)(?::(\d+))?/)
     const host = urlMatch ? urlMatch[1] : '127.0.0.1'
-    const port = urlMatch && urlMatch[2] ? parseInt(urlMatch[2]) : 1883
+    const port = urlMatch && urlMatch[2] ? parseInt(urlMatch[2]) : mqttConfig.value.port || 3333
 
     // 将 Reactive Proxy 对象转换为纯对象（避免序列化错误）
     const result = await window.api.mqtt.connect({
@@ -2863,13 +2863,22 @@ watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
 
       <div v-if="!wasConnected" class="cockpit-standby">
         <span class="standby-reticle">+</span>
-        <span class="standby-eyebrow">VIDEO CHANNEL / BNGUCLIENT</span>
         <h1>等待图传接入</h1>
-        <p>{{ isConnecting ? videoStatus : '配置视频来源，接入画面后开始操作。' }}</p>
+        <p>{{ isConnecting ? videoStatus : '在连接配置中选择视频来源。' }}</p>
         <button :disabled="isConnecting" @click="openSettings('network')">{{ isConnecting ? '正在连接…' : '配置图传与连接' }}</button>
-        <small>未接入时不显示模拟画面或随机状态</small>
       </div>
-      <div v-else-if="videoStatus" class="video-status-overlay">{{ videoStatus }}</div>
+      <div v-else-if="videoStatus" class="video-status-overlay">
+        {{ videoStatus }}
+        <small v-if="videoSource === 'udp' && udpStreamStatus === 'connected'" class="udp-wait-stats">
+          已接收 {{ ((udpStats.totalBytes ?? 0) / 1024 / 1024).toFixed(2) }} MB ·
+          已输出 {{ udpStats.receivedFrames }} 帧 ·
+          已丢弃 {{ udpStats.droppedFrames ?? 0 }} ·
+          错误 {{ udpStats.errors ?? 0 }} ·
+          {{ udpStats.decoderWaitingKeyframe ? '等待关键帧' : '未等待关键帧' }} ·
+          解码器 {{ udpStats.decoderBackend ?? 'unknown' }} ·
+          待解码 {{ udpStats.decodeQueueDepth ?? 0 }}
+        </small>
+      </div>
 
       <!-- 动态准星（带环形热量进度） -->
       <div
@@ -3275,7 +3284,7 @@ watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
                 </h4>
                 <div class="form-item">
                   <label for="ip">IP 地址</label>
-                  <input id="ip" v-model="ipAddress" type="text" placeholder="例: 192.168.12.1" />
+                  <input id="ip" v-model="ipAddress" type="text" placeholder="127.0.0.1" />
                 </div>
                 <div class="hint-text">
                   <svg
@@ -3290,7 +3299,7 @@ watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
                     <line x1="12" y1="16" x2="12" y2="12"></line>
                     <line x1="12" y1="8" x2="12.01" y2="8"></line>
                   </svg>
-                  统一的机器人 IP 地址，UDP 和 MQTT 将使用此地址连接
+                  默认 127.0.0.1 表示本机，用于连接这台电脑上的官方选手端。此处也用于筛选视频来源。
                 </div>
               </div>
 
@@ -3361,13 +3370,13 @@ watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
                 <div class="codec-hint">
                   <template v-if="udpConfig.codec === 'auto'"> 自动检测帧格式（推荐） </template>
                   <template v-else-if="udpConfig.codec === 'mjpeg'">
-                    MJPEG: 低延迟，兼容性好
+                    接收 MJPEG 格式的视频
                   </template>
                   <template v-else-if="udpConfig.codec === 'h264'">
-                    H.264: 前端解码已移除，当前不可用
+                    当前不支持 H.264 视频
                   </template>
                   <template v-else-if="udpConfig.codec === 'h265'">
-                    H.265: 后端解码后以 MJPEG 本机流显示
+                    接收并显示官方图传使用的 H.265 视频
                   </template>
                 </div>
 
@@ -3436,7 +3445,7 @@ watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
                     <line x1="12" y1="16" x2="12" y2="12"></line>
                     <line x1="12" y1="8" x2="12.01" y2="8"></line>
                   </svg>
-                  UDP 图传接收 H.265 格式的视频帧，需要在发送端配置相同的端口
+                  默认在本机 3334 端口接收视频；视频发送端也要使用这个目标端口。
                 </div>
               </div>
 
@@ -3455,17 +3464,17 @@ watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
                     <path d="M4 4a16 16 0 0 1 16 16"></path>
                     <circle cx="5" cy="19" r="1"></circle>
                   </svg>
-                  MQTT 通信
+                  状态数据连接（MQTT）
                 </h4>
 
                 <div class="form-item">
-                  <label for="mqtt-broker">Broker 地址</label>
+                  <label for="mqtt-broker">服务器地址</label>
                   <div class="input-with-button">
                     <input
                       id="mqtt-broker"
                       v-model="mqttConfig.brokerUrl"
                       type="text"
-                      placeholder="mqtt://127.0.0.1:1883"
+                      placeholder="mqtt://127.0.0.1:3333"
                     />
                     <button
                       v-if="mqttStatus === 'disconnected' || mqttStatus === 'error'"
@@ -3479,7 +3488,7 @@ watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
                     </button>
                   </div>
                   <span class="input-hint"
-                    >格式: mqtt://host:port 或 ws://host:port (WebSocket)</span
+                    >本机默认填 mqtt://127.0.0.1:3333；连接其他电脑时替换其中的 IP。</span
                   >
                   <span v-if="mqttNeedsManualReconnect" class="input-hint warning">
                     IP 或端口已修改，请手动重新连接 MQTT
@@ -3494,13 +3503,13 @@ watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
                     type="number"
                     min="1024"
                     max="65535"
-                    placeholder="1883"
+                    placeholder="3333"
                   />
                 </div>
 
                 <div class="form-grid-2col">
                   <div class="form-item">
-                    <label for="mqtt-clientid">Client ID</label>
+                    <label for="mqtt-clientid">机器人编号（Client ID）</label>
                     <input
                       id="mqtt-clientid"
                       v-model.trim="mqttConfig.clientId"
@@ -3509,7 +3518,7 @@ watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
                       placeholder="例如 3 或 103"
                     />
                     <span class="input-hint">
-                      按 RM2026 协议填写本机机器人 ID；当前连接：{{ mqttActiveClientId ?? '未连接' }}
+                      填你要连接的机器人编号，例如红方3号填 3。当前连接：{{ mqttActiveClientId ?? '未连接' }}
                     </span>
                     <span
                       v-if="mqttStatus === 'connected' && mqttConfig.clientId.trim() !== mqttActiveClientId"
@@ -3584,7 +3593,7 @@ watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
                     <line x1="12" y1="16" x2="12" y2="12"></line>
                     <line x1="12" y1="8" x2="12.01" y2="8"></line>
                   </svg>
-                  MQTT 使用 Protobuf 编码消息，用于机器人状态、比赛信息等实时通信
+                  接收血量、热量和比赛状态。点击上方“连接”后，检查已接收消息数是否增加。
                 </div>
 
                 <!-- MQTT 指令发送面板（仅调试模式显示） -->
@@ -4168,6 +4177,12 @@ watch(isAnyMenuOpen, open => { if (open) releaseControl() }, { flush: 'sync' })
   background: rgba(0, 0, 0, 0.2);
   padding: 8px 16px;
   border-radius: 8px;
+}
+
+.udp-wait-stats {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
 }
 
 .hint {

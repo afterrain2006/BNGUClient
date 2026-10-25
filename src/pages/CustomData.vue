@@ -3,7 +3,7 @@
     <!-- 标题栏 -->
     <div class="header">
       <h1 class="title">自定义数据实时显示</h1>
-      <div class="subtitle">解析自 CustomByteBlock MQTT 消息</div>
+      <div class="subtitle">查看电控通过 CustomByteBlock 发来的内容</div>
     </div>
 
     <!-- 空状态 -->
@@ -14,10 +14,10 @@
         <line x1="12" y1="8" x2="12.01" y2="8"></line>
       </svg>
       <h3>暂无数据</h3>
-      <p>等待接收 CustomByteBlock 消息...</p>
+      <p>等待电控发送自定义数据…</p>
       <div class="tip">
         <span>📌 提示：</span>
-        <span>请确保已在 Dashboard 中选择机器人并连接 MQTT</span>
+        <span>请先在“连接配置”中连接状态数据，并选择要查看的机器人</span>
       </div>
     </div>
 
@@ -55,7 +55,7 @@
       </div>
 
       <div v-if="currentRobotData.mode === undefined" class="fields-section">
-        <p>已收到原始字节流；当前自定义内容解析接口尚未实现。</p>
+        <p>已收到数据，但还没有按电控约定解释其中的内容。目前可查看下方原始字节。</p>
         <code>{{ currentRobotData.rawBuffer?.map(value => value.toString(16).padStart(2, '0')).join(' ') }}</code>
       </div>
 

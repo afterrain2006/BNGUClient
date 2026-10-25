@@ -81,3 +81,6 @@ src-tauri/vendor/ffmpeg-static/
 /artifacts/mqtt-handshake-fix-2026-10-17/
 /artifacts/mqtt-timeout-repro-2026-10-17/
 /docs/artifacts/
+
+# Local field-test captures and investigation scripts
+/artifacts/engine-debug-2026-10-24/

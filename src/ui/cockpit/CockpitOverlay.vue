@@ -24,7 +24,7 @@ const countdown = computed(() => {
   if (seconds === undefined) return '—:—'
   return `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`
 })
-const linkLabel = computed(() => !connection.connected ? 'OFFLINE · 未连接' : !connection.lastMessageTime ? 'MQTT 已连接 · 等待消息' : now.value - connection.lastMessageTime > 3000 ? 'MQTT 已连接 · 消息已过期' : 'LIVE · 正在接收')
+const linkLabel = computed(() => !connection.connected ? '状态数据未连接' : !connection.lastMessageTime ? 'MQTT 已连接 · 等待消息' : now.value - connection.lastMessageTime > 3000 ? 'MQTT 已连接 · 消息已过期' : '正在接收状态数据')
 const videoFresh = computed(() => dashboard.udpStreamStatus === 'connected' && dashboard.udpStats.lastFrameTime > 0 && now.value - dashboard.udpStats.lastFrameTime < 3000)
 const heatPercent = computed(() => {
   const heat = robot.value?.combat.currentHeat
@@ -44,8 +44,8 @@ const heatPercent = computed(() => {
       <div class="unit-metrics"><div><span>剩余弹量</span><strong>{{ robot?.combat.remainingAmmo ?? '—' }}<small>发</small></strong></div><div><span>底盘能量</span><strong>{{ robot?.combat.currentChassisEnergy ?? '—' }}<small>J</small></strong></div></div>
       <div class="unit-heat"><span>射击热量</span><span>{{ robot?.combat.currentHeat?.toFixed(1) ?? '—' }} / {{ robot?.configuration.maxHeat ?? '—' }}</span></div><div class="heat-track"><i :style="{ width: heatPercent + '%' }" /></div>
     </section>
-    <section class="cockpit-map" aria-label="场地位置示意"><div class="unit-heading"><span>场地位置</span><span>示意</span></div><div class="cockpit-map-canvas"><MiniMap :show-legend="false" /></div><p>X {{ robot?.pose.position.x?.toFixed(2) ?? '—' }} · Y {{ robot?.pose.position.y?.toFixed(2) ?? '—' }} · {{ getDataFreshness(robot?.poseUpdatedAt ?? 0, now) === 'fresh' ? '位置已同步' : '等待新鲜位置' }}</p><small>地图标定需实机核对</small></section>
-    <footer class="cockpit-footer"><span>连接身份 {{ connection.activeClientId ?? '—' }} · RX {{ connection.messagesReceived }}</span><span>{{ videoFresh ? dashboard.udpStats.fps.toFixed(0) + ' FPS' : '— FPS' }} · {{ dashboard.cameraStatus }}</span></footer>
+    <section class="cockpit-map" aria-label="场地位置示意"><div class="unit-heading"><span>场地位置</span><span>示意</span></div><div class="cockpit-map-canvas"><MiniMap :show-legend="false" /></div><p>X {{ robot?.pose.position.x?.toFixed(2) ?? '—' }} · Y {{ robot?.pose.position.y?.toFixed(2) ?? '—' }} · {{ getDataFreshness(robot?.poseUpdatedAt ?? 0, now) === 'fresh' ? '位置已同步' : '等待位置更新' }}</p><small>地图标定需实机核对</small></section>
+    <footer class="cockpit-footer"><span>机器人编号 {{ connection.activeClientId ?? '—' }} · 已接收 {{ connection.messagesReceived }} 条消息</span><span>{{ videoFresh ? dashboard.udpStats.fps.toFixed(0) + ' FPS' : '— FPS' }} · {{ dashboard.cameraStatus }}</span></footer>
   </div>
 </template>
 

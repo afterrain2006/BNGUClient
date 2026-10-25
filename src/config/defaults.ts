@@ -39,8 +39,8 @@ export const DEFAULT_UDP_CONFIG = {
 export const UDP_CODEC_OPTIONS = [
   { value: 'auto', label: '自动检测' },
   { value: 'mjpeg', label: 'MJPEG' },
-  { value: 'h264', label: 'H.264（前端解码已移除）', disabled: true },
-  { value: 'h265', label: 'H.265 (HEVC，后端解码)' }
+  { value: 'h264', label: 'H.264（暂不支持）', disabled: true },
+  { value: 'h265', label: 'H.265（官方图传）' }
 ] as const
 
 // ==================== MQTT 配置常量 ====================

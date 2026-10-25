@@ -33,7 +33,7 @@
         </div>
         <div class="card-content">
           <div class="card-title">摄像头</div>
-          <div class="card-desc">直接从本机摄像头抓取视频流</div>
+          <div class="card-desc">显示连接到电脑的摄像头画面</div>
         </div>
       </label>
 
@@ -97,7 +97,7 @@
         </div>
         <div class="card-content">
           <div class="card-title">UDP</div>
-          <div class="card-desc">通过 UDP 接收图像帧</div>
+          <div class="card-desc">接收图传发送的视频</div>
         </div>
       </label>
     </div>
@@ -141,7 +141,7 @@
             <line x1="12" y1="16" x2="12" y2="12"></line>
             <line x1="12" y1="8" x2="12.01" y2="8"></line>
           </svg>
-          <span>UDP 地址、端口和编码类型在"网络"标签页配置</span>
+          <span>接收地址、端口和视频格式在“网络”页设置</span>
         </div>
       </div>
 
